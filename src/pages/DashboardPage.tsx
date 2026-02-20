@@ -1,0 +1,131 @@
+import React from 'react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Users, UserCheck, Building2, CalendarDays, TrendingUp, TrendingDown } from 'lucide-react';
+import { useAuth } from '@/contexts/AuthContext';
+import { mockEmployees, mockDepartments, mockLeaveRequests } from '@/data/mock-data';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line } from 'recharts';
+
+const barData = [
+  { month: 'Sep', hires: 5 }, { month: 'Oct', hires: 8 }, { month: 'Nov', hires: 3 },
+  { month: 'Dec', hires: 6 }, { month: 'Jan', hires: 4 }, { month: 'Feb', hires: 7 },
+];
+
+const deptData = mockDepartments.map(d => ({ name: d.name, value: d.employeeCount }));
+const COLORS = ['hsl(232,54%,48%)', 'hsl(187,100%,38%)', 'hsl(340,82%,56%)', 'hsl(142,71%,45%)', 'hsl(38,92%,50%)', 'hsl(270,60%,55%)'];
+
+const attendanceData = [
+  { day: 'Mon', present: 92 }, { day: 'Tue', present: 88 }, { day: 'Wed', present: 95 },
+  { day: 'Thu', present: 90 }, { day: 'Fri', present: 85 },
+];
+
+const stats = [
+  { title: 'Total Employees', value: mockEmployees.length, icon: Users, change: '+12%', up: true, color: 'primary' },
+  { title: 'Active', value: mockEmployees.filter(e => e.status === 'active').length, icon: UserCheck, change: '+5%', up: true, color: 'secondary' },
+  { title: 'Departments', value: mockDepartments.length, icon: Building2, change: '0%', up: true, color: 'info' },
+  { title: 'Pending Leaves', value: mockLeaveRequests.filter(l => l.status === 'pending').length, icon: CalendarDays, change: '-8%', up: false, color: 'warning' },
+];
+
+const DashboardPage: React.FC = () => {
+  const { user } = useAuth();
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-bold">Welcome back, {user?.name} 👋</h1>
+        <p className="text-muted-foreground">Here's what's happening today.</p>
+      </div>
+
+      {/* Stats */}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {stats.map(({ title, value, icon: Icon, change, up }) => (
+          <Card key={title} className="shadow-sm hover:shadow-md transition-shadow">
+            <CardContent className="flex items-center justify-between p-5">
+              <div>
+                <p className="text-sm text-muted-foreground">{title}</p>
+                <p className="text-3xl font-bold mt-1">{value}</p>
+                <div className="flex items-center gap-1 mt-1 text-xs">
+                  {up ? <TrendingUp size={14} className="text-success" /> : <TrendingDown size={14} className="text-destructive" />}
+                  <span className={up ? 'text-success' : 'text-destructive'}>{change}</span>
+                </div>
+              </div>
+              <div className="flex h-12 w-12 items-center justify-center rounded-xl gradient-primary text-white">
+                <Icon size={22} />
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      {/* Charts */}
+      <div className="grid gap-6 lg:grid-cols-2">
+        <Card className="shadow-sm">
+          <CardHeader><CardTitle className="text-base">Monthly Hires</CardTitle></CardHeader>
+          <CardContent>
+            <ResponsiveContainer width="100%" height={260}>
+              <BarChart data={barData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                <XAxis dataKey="month" tick={{ fontSize: 12 }} />
+                <YAxis tick={{ fontSize: 12 }} />
+                <Tooltip />
+                <Bar dataKey="hires" fill="hsl(232,54%,48%)" radius={[6, 6, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+
+        <Card className="shadow-sm">
+          <CardHeader><CardTitle className="text-base">Department Distribution</CardTitle></CardHeader>
+          <CardContent className="flex items-center justify-center">
+            <ResponsiveContainer width="100%" height={260}>
+              <PieChart>
+                <Pie data={deptData} cx="50%" cy="50%" innerRadius={60} outerRadius={100} paddingAngle={3} dataKey="value" label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}>
+                  {deptData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+                </Pie>
+                <Tooltip />
+              </PieChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+
+        <Card className="shadow-sm lg:col-span-2">
+          <CardHeader><CardTitle className="text-base">Weekly Attendance Rate (%)</CardTitle></CardHeader>
+          <CardContent>
+            <ResponsiveContainer width="100%" height={220}>
+              <LineChart data={attendanceData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                <XAxis dataKey="day" tick={{ fontSize: 12 }} />
+                <YAxis domain={[80, 100]} tick={{ fontSize: 12 }} />
+                <Tooltip />
+                <Line type="monotone" dataKey="present" stroke="hsl(187,100%,38%)" strokeWidth={2} dot={{ r: 4 }} />
+              </LineChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Recent leaves */}
+      <Card className="shadow-sm">
+        <CardHeader><CardTitle className="text-base">Recent Leave Requests</CardTitle></CardHeader>
+        <CardContent>
+          <div className="space-y-3">
+            {mockLeaveRequests.slice(0, 4).map(lr => (
+              <div key={lr.id} className="flex items-center justify-between rounded-lg border p-3">
+                <div>
+                  <p className="font-medium text-sm">{lr.employeeName}</p>
+                  <p className="text-xs text-muted-foreground">{lr.type} · {lr.startDate} to {lr.endDate}</p>
+                </div>
+                <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                  lr.status === 'approved' ? 'bg-success/10 text-success' :
+                  lr.status === 'rejected' ? 'bg-destructive/10 text-destructive' :
+                  'bg-warning/10 text-warning'
+                }`}>{lr.status}</span>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+};
+
+export default DashboardPage;
