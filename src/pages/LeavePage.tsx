@@ -1,0 +1,120 @@
+import React, { useState } from 'react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
+import { Plus, CheckCircle, XCircle } from 'lucide-react';
+import { LeaveRequest } from '@/types/models';
+import { mockLeaveRequests } from '@/data/mock-data';
+import { toast } from 'sonner';
+import { useAuth } from '@/contexts/AuthContext';
+
+const LeavePage: React.FC = () => {
+  const { user } = useAuth();
+  const isManager = user?.role === 'admin' || user?.role === 'manager';
+  const [leaves, setLeaves] = useState<LeaveRequest[]>(mockLeaveRequests);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [form, setForm] = useState({ type: 'casual' as LeaveRequest['type'], startDate: '', endDate: '', reason: '' });
+
+  const handleApply = () => {
+    if (!form.startDate || !form.endDate) { toast.error('Select dates'); return; }
+    const newLeave: LeaveRequest = {
+      id: Date.now().toString(), employeeId: user?.id || '', employeeName: user?.name || '',
+      ...form, status: 'pending', appliedOn: new Date().toISOString().split('T')[0],
+    };
+    setLeaves(prev => [newLeave, ...prev]);
+    toast.success('Leave applied');
+    setDialogOpen(false);
+    setForm({ type: 'casual', startDate: '', endDate: '', reason: '' });
+  };
+
+  const updateStatus = (id: string, status: 'approved' | 'rejected') => {
+    setLeaves(prev => prev.map(l => l.id === id ? { ...l, status } : l));
+    toast.success(`Leave ${status}`);
+  };
+
+  const statusStyle = (s: string) =>
+    s === 'approved' ? 'bg-success/10 text-success' : s === 'rejected' ? 'bg-destructive/10 text-destructive' : 'bg-warning/10 text-warning';
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">Leave Management</h1>
+          <p className="text-sm text-muted-foreground">{leaves.filter(l => l.status === 'pending').length} pending requests</p>
+        </div>
+        <Button onClick={() => setDialogOpen(true)}><Plus size={16} className="mr-2" /> Apply Leave</Button>
+      </div>
+
+      <Card className="shadow-sm">
+        <CardContent className="p-0">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Employee</TableHead>
+                <TableHead>Type</TableHead>
+                <TableHead>From</TableHead>
+                <TableHead>To</TableHead>
+                <TableHead>Reason</TableHead>
+                <TableHead>Status</TableHead>
+                {isManager && <TableHead className="text-right">Actions</TableHead>}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {leaves.map(l => (
+                <TableRow key={l.id}>
+                  <TableCell className="font-medium">{l.employeeName}</TableCell>
+                  <TableCell className="capitalize">{l.type}</TableCell>
+                  <TableCell>{l.startDate}</TableCell>
+                  <TableCell>{l.endDate}</TableCell>
+                  <TableCell className="max-w-[200px] truncate">{l.reason}</TableCell>
+                  <TableCell><span className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusStyle(l.status)}`}>{l.status}</span></TableCell>
+                  {isManager && (
+                    <TableCell className="text-right space-x-1">
+                      {l.status === 'pending' && <>
+                        <Button variant="ghost" size="icon" onClick={() => updateStatus(l.id, 'approved')}><CheckCircle size={16} className="text-success" /></Button>
+                        <Button variant="ghost" size="icon" onClick={() => updateStatus(l.id, 'rejected')}><XCircle size={16} className="text-destructive" /></Button>
+                      </>}
+                    </TableCell>
+                  )}
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+
+      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Apply for Leave</DialogTitle></DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-1">
+              <Label>Leave Type</Label>
+              <Select value={form.type} onValueChange={v => setForm(f => ({ ...f, type: v as LeaveRequest['type'] }))}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {['sick', 'casual', 'annual', 'maternity', 'other'].map(t => <SelectItem key={t} value={t} className="capitalize">{t}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1"><Label>Start Date *</Label><Input type="date" value={form.startDate} onChange={e => setForm(f => ({ ...f, startDate: e.target.value }))} /></div>
+              <div className="space-y-1"><Label>End Date *</Label><Input type="date" value={form.endDate} onChange={e => setForm(f => ({ ...f, endDate: e.target.value }))} /></div>
+            </div>
+            <div className="space-y-1"><Label>Reason</Label><Textarea value={form.reason} onChange={e => setForm(f => ({ ...f, reason: e.target.value }))} rows={3} /></div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
+            <Button onClick={handleApply}>Submit</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+};
+
+export default LeavePage;
