@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import {
-  LayoutDashboard, Users, Building2, CalendarDays, DollarSign,
+  LayoutDashboard, Users, Building2, CalendarDays, DollarSign, Clock,
   ChevronLeft, ChevronRight, LogOut
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
@@ -13,6 +13,7 @@ const navItems = [
   { to: '/departments', label: 'Departments', icon: Building2 },
   { to: '/leave', label: 'Leave', icon: CalendarDays },
   { to: '/payroll', label: 'Payroll', icon: DollarSign },
+  { to: '/attendance', label: 'Attendance', icon: Clock },
 ];
 
 interface SidebarProps {
