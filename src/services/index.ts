@@ -4,3 +4,4 @@ export { employeeService } from './employee.service';
 export { departmentService } from './department.service';
 export { leaveService } from './leave.service';
 export { payrollService } from './payroll.service';
+export { attendanceService } from './attendance.service';
