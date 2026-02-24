@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, Users, Building2, CalendarDays, DollarSign, Clock,
-  ChevronLeft, ChevronRight, LogOut
+  ChevronLeft, ChevronRight, LogOut, Settings
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
@@ -14,6 +14,7 @@ const navItems = [
   { to: '/leave', label: 'Leave', icon: CalendarDays },
   { to: '/payroll', label: 'Payroll', icon: DollarSign },
   { to: '/attendance', label: 'Attendance', icon: Clock },
+  { to: '/settings', label: 'Settings', icon: Settings, adminOnly: true },
 ];
 
 interface SidebarProps {
@@ -22,8 +23,9 @@ interface SidebarProps {
 }
 
 const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
-  const { logout } = useAuth();
+  const { user, logout } = useAuth();
   const location = useLocation();
+  const filteredNav = navItems.filter(item => !('adminOnly' in item) || user?.role === 'admin');
 
   return (
     <aside
@@ -47,7 +49,7 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
 
       {/* Nav */}
       <nav className="flex-1 space-y-1 px-2 py-4">
-        {navItems.map(({ to, label, icon: Icon }) => {
+        {filteredNav.map(({ to, label, icon: Icon }) => {
           const active = location.pathname.startsWith(to);
           return (
             <NavLink
