@@ -2,7 +2,8 @@ import React from 'react';
 import { Bell, Moon, Sun, ChevronRight } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
-import { useLocation } from 'react-router-dom';
+
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
   DropdownMenuSeparator, DropdownMenuTrigger
@@ -23,6 +24,8 @@ const Navbar: React.FC = () => {
   const { user, logout, switchRole } = useAuth();
   const { isDark, toggle } = useTheme();
   const location = useLocation();
+
+  const navigate = useNavigate();
 
   const pageTitle = Object.entries(routeLabels).find(([path]) =>
     location.pathname.startsWith(path)
@@ -72,6 +75,8 @@ const Navbar: React.FC = () => {
               <p className="text-sm font-medium">{user?.name}</p>
               <p className="text-xs text-muted-foreground">{user?.email}</p>
             </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => navigate('/profile')}>My Profile</DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuLabel className="text-xs text-muted-foreground">Switch Role</DropdownMenuLabel>
             {(['admin', 'manager', 'employee'] as UserRole[]).map(role => (
