@@ -2,7 +2,6 @@ import React from 'react';
 import { Bell, Moon, Sun, ChevronRight } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
-
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
@@ -24,8 +23,8 @@ const Navbar: React.FC = () => {
   const { user, logout, switchRole } = useAuth();
   const { isDark, toggle } = useTheme();
   const location = useLocation();
-
   const navigate = useNavigate();
+
 
   const pageTitle = Object.entries(routeLabels).find(([path]) =>
     location.pathname.startsWith(path)

@@ -9,7 +9,9 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Progress } from '@/components/ui/progress';
 import { Calendar } from '@/components/ui/calendar';
-import { Plus, CheckCircle, XCircle, CalendarDays, ListChecks, BarChart3 } from 'lucide-react';import { LeaveRequest } from '@/types/models';
+import { Plus, CheckCircle, XCircle, CalendarDays, ListChecks, BarChart3 } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
+import { LeaveRequest } from '@/types/models';
 import { leaveService } from '@/services/leave.service';
 import { mockLeaveBalances, publicHolidays } from '@/data/leave-balance';
 import { toast } from 'sonner';
@@ -179,6 +181,13 @@ const fetchLeaves = async () => {
       return 'bg-blue-900/10 text-blue-900'; // 🔥 Navy Blue
   }
 };
+
+  
+
+  const getHolidayName = (date: Date) => {
+    const ds = date.toISOString().split('T')[0];
+    return publicHolidays.find(h => h.date === ds)?.name;
+  };
 
   return (
     <div className="space-y-6">
