@@ -9,12 +9,12 @@ import { cn } from '@/lib/utils';
 
 const navItems = [
   { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { to: '/employees', label: 'Employees', icon: Users },
-  { to: '/departments', label: 'Departments', icon: Building2 },
+  { to: '/employees', label: 'Employees', icon: Users, minRole: 'manager' as const },
+  { to: '/departments', label: 'Departments', icon: Building2, minRole: 'manager' as const },
   { to: '/leave', label: 'Leave', icon: CalendarDays },
   { to: '/payroll', label: 'Payroll', icon: DollarSign },
   { to: '/attendance', label: 'Attendance', icon: Clock },
-  { to: '/settings', label: 'Settings', icon: Settings, adminOnly: true },
+  { to: '/settings', label: 'Settings', icon: Settings, minRole: 'admin' as const },
 ];
 
 interface SidebarProps {
@@ -25,7 +25,11 @@ interface SidebarProps {
 const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
   const { user, logout } = useAuth();
   const location = useLocation();
-  const filteredNav = navItems.filter(item => !('adminOnly' in item) || user?.role === 'admin');
+  const roleLevel = (r: string) => r === 'admin' ? 3 : r === 'manager' ? 2 : 1;
+  const filteredNav = navItems.filter(item => {
+    if (!item.minRole) return true;
+    return roleLevel(user?.role || 'employee') >= roleLevel(item.minRole);
+  });
 
   return (
     <aside
