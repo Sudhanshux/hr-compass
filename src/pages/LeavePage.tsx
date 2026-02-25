@@ -39,8 +39,12 @@ const LeavePage: React.FC = () => {
   };
 
   const updateStatus = (id: string, status: 'approved' | 'rejected') => {
+    const leave = leaves.find(l => l.id === id);
     setLeaves(prev => prev.map(l => l.id === id ? { ...l, status } : l));
-    toast.success(`Leave ${status}`);
+    toast.success(`Leave ${status}`, {
+      description: `${leave?.employeeName}'s ${leave?.type} leave (${leave?.startDate} to ${leave?.endDate}) has been ${status}.`,
+      duration: 6000,
+    });
   };
 
   const statusStyle = (s: string) =>
