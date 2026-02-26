@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, Users, Building2, CalendarDays, DollarSign, Clock,
-  ChevronLeft, ChevronRight, LogOut, Settings
+  ChevronLeft, ChevronRight, LogOut, Settings, TrendingUp
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
@@ -14,6 +14,7 @@ const navItems = [
   { to: '/leave', label: 'Leave', icon: CalendarDays },
   { to: '/payroll', label: 'Payroll', icon: DollarSign },
   { to: '/attendance', label: 'Attendance', icon: Clock },
+  { to: '/performance', label: 'Performance', icon: TrendingUp },
   { to: '/settings', label: 'Settings', icon: Settings, minRole: 'admin' as const },
 ];
 
