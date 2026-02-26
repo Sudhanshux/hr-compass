@@ -16,9 +16,11 @@ import { leaveService } from '@/services/leave.service';
 import { mockLeaveBalances, publicHolidays } from '@/data/leave-balance';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
+import { useNotifications } from '@/contexts/NotificationContext';
 
 const LeavePage: React.FC = () => {
   const { user } = useAuth();
+  const { addNotification } = useNotifications();
   const isManager = user?.role === 'admin' || user?.role === 'manager';
 
   const [leaves, setLeaves] = useState<LeaveRequest[]>([]);
@@ -111,9 +113,15 @@ const fetchLeaves = async () => {
     } else {
       await leaveService.reject(id);
     }
-
+  const leave = leaves.find(l => l.id === id);
+  const msg = `${leave?.employeeName}'s ${leave?.leaveType} leave (${leave?.startDate} to ${leave?.endDate}) has been ${status}.`;
     toast.success(`Leave ${status.toLowerCase()}`);
     await fetchLeaves();
+    addNotification({
+      title: `Leave ${status.charAt(0).toUpperCase() + status.slice(1)}`,
+      message: msg,
+      type: status === 'APPROVED' ? 'success' : 'warning',
+    });
 
   } catch (error) {
     console.error(error);

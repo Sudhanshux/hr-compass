@@ -12,11 +12,9 @@ import { departmentService } from '@/services/department.service';
 import { leaveService } from '@/services/leave.service';
 import { attendanceService } from '@/services/attendance.service';
 import { payrollService } from '@/services/payroll.service';
-import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  PieChart, Pie, Cell,
-  LineChart, Line,
-} from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line } from 'recharts';
+import Announcements from '@/components/dashboard/Announcements';
+import TodoList from '@/components/dashboard/TodoList';
 
 const COLORS = [
   'hsl(232,54%,48%)',
@@ -149,6 +147,13 @@ const AdminDashboard: React.FC<{ userName: string }> = ({ userName }) => {
         ))}
       </div>
 
+      {/* Announcements & Todo */}
+      <div className="grid gap-6 lg:grid-cols-2">
+        <Announcements />
+        <TodoList />
+      </div>
+
+      {/* Charts */}
       <div className="grid gap-6 lg:grid-cols-2">
         <Card className="shadow-sm">
           <CardHeader><CardTitle className="text-base">Monthly Hires</CardTitle></CardHeader>
@@ -294,6 +299,10 @@ const EmployeeDashboard: React.FC<{ userName: string; employeeId: string }> = ({
     { title: 'Leave Balance',  value: `${totalLeaveRemaining} days`, icon: CalendarDays, desc: 'Days remaining',  accent: 'bg-info/10 text-info'         },
     { title: 'Net Salary',     value: netSalary,                   icon: DollarSign,   desc: salaryMonth,         accent: 'bg-primary/10 text-primary'   },
   ];
+/* ── Employee-specific Dashboard ── */
+
+    // const myPayslip = mockPayslips[0];
+  // const myLeaves = leaveBalance.filter(l => l.employeeId === '3' || l.status === 'pending').slice(0, 3);
 
   return (
     <div className="space-y-6">
@@ -320,6 +329,13 @@ const EmployeeDashboard: React.FC<{ userName: string; employeeId: string }> = ({
         ))}
       </div>
 
+      {/* Announcements & Todo */}
+      <div className="grid gap-6 lg:grid-cols-2">
+        <Announcements />
+        <TodoList />
+      </div>
+
+      {/* Leave Balance */}
       <Card className="shadow-sm">
         <CardHeader><CardTitle className="text-base">Leave Balance</CardTitle></CardHeader>
         <CardContent>
@@ -388,7 +404,7 @@ const DashboardPage: React.FC = () => {
   const role       = (user?.role ?? '').toLowerCase();
   const isEmployee = role === 'employee';
   const userName   = user?.name ?? user?.name ?? 'User';
-  const employeeId = user?.employeeId ?? '';
+const employeeId = user?.employeeId?.toString() ?? '';
 
   if (isEmployee) {
     return <EmployeeDashboard userName={userName} employeeId={employeeId} />;

@@ -114,8 +114,9 @@ const PayrollPage: React.FC = () => {
 
       {/* PDF-like Payslip Preview */}
       <Dialog open={viewOpen} onOpenChange={setViewOpen}>
-        <DialogContent className="max-w-2xl p-0 overflow-hidden">
+        <DialogContent className="max-w-2xl p-0 overflow-hidden" aria-describedby={undefined}>
           <div className="flex items-center justify-between px-6 py-3 border-b bg-muted/50">
+            <span className="sr-only">Payslip Preview</span>
             <span className="text-sm font-medium text-muted-foreground">Payslip Preview</span>
             <div className="flex gap-2">
               <Button variant="outline" size="sm" className="gap-1.5" onClick={handlePrint}>
