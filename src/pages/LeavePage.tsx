@@ -17,9 +17,11 @@ import { mockLeaveRequests } from '@/data/mock-data';
 import { mockLeaveBalances, publicHolidays } from '@/data/leave-balance';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
+import { useNotifications } from '@/contexts/NotificationContext';
 
 const LeavePage: React.FC = () => {
   const { user } = useAuth();
+  const { addNotification } = useNotifications();
   const isManager = user?.role === 'admin' || user?.role === 'manager';
   const [leaves, setLeaves] = useState<LeaveRequest[]>(mockLeaveRequests);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -41,9 +43,12 @@ const LeavePage: React.FC = () => {
   const updateStatus = (id: string, status: 'approved' | 'rejected') => {
     const leave = leaves.find(l => l.id === id);
     setLeaves(prev => prev.map(l => l.id === id ? { ...l, status } : l));
-    toast.success(`Leave ${status}`, {
-      description: `${leave?.employeeName}'s ${leave?.type} leave (${leave?.startDate} to ${leave?.endDate}) has been ${status}.`,
-      duration: 6000,
+    const msg = `${leave?.employeeName}'s ${leave?.type} leave (${leave?.startDate} to ${leave?.endDate}) has been ${status}.`;
+    toast.success(`Leave ${status}`, { description: msg, duration: 6000 });
+    addNotification({
+      title: `Leave ${status.charAt(0).toUpperCase() + status.slice(1)}`,
+      message: msg,
+      type: status === 'approved' ? 'success' : 'warning',
     });
   };
 

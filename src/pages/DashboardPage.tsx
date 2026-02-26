@@ -6,6 +6,8 @@ import { mockEmployees, mockDepartments, mockLeaveRequests, mockPayslips } from 
 import { mockLeaveBalances } from '@/data/leave-balance';
 import { Progress } from '@/components/ui/progress';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line } from 'recharts';
+import Announcements from '@/components/dashboard/Announcements';
+import TodoList from '@/components/dashboard/TodoList';
 
 const barData = [
   { month: 'Sep', hires: 5 }, { month: 'Oct', hires: 8 }, { month: 'Nov', hires: 3 },
@@ -61,6 +63,12 @@ const DashboardPage: React.FC = () => {
             </CardContent>
           </Card>
         ))}
+      </div>
+
+      {/* Announcements & Todo */}
+      <div className="grid gap-6 lg:grid-cols-2">
+        <Announcements />
+        <TodoList />
       </div>
 
       {/* Charts */}
@@ -137,7 +145,7 @@ const DashboardPage: React.FC = () => {
 
 /* ── Employee-specific Dashboard ── */
 const EmployeeDashboard: React.FC<{ userName: string }> = ({ userName }) => {
-  const myPayslip = mockPayslips[0]; // mock current user's payslip
+  const myPayslip = mockPayslips[0];
   const myLeaves = mockLeaveRequests.filter(l => l.employeeId === '3' || l.status === 'pending').slice(0, 3);
 
   return (
@@ -168,6 +176,12 @@ const EmployeeDashboard: React.FC<{ userName: string }> = ({ userName }) => {
             </CardContent>
           </Card>
         ))}
+      </div>
+
+      {/* Announcements & Todo */}
+      <div className="grid gap-6 lg:grid-cols-2">
+        <Announcements />
+        <TodoList />
       </div>
 
       {/* Leave Balance */}

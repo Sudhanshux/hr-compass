@@ -1,5 +1,5 @@
-import React from 'react';
-import { Bell, Moon, Sun, ChevronRight } from 'lucide-react';
+import React, { useState } from 'react';
+import { Bell, Moon, Sun, ChevronRight, X } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -7,9 +7,14 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
   DropdownMenuSeparator, DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu';
+import {
+  Popover, PopoverContent, PopoverTrigger
+} from '@/components/ui/popover';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { UserRole } from '@/types/models';
+import { useNotifications } from '@/contexts/NotificationContext';
 
 const routeLabels: Record<string, string> = {
   '/dashboard': 'Dashboard',
@@ -17,11 +22,16 @@ const routeLabels: Record<string, string> = {
   '/departments': 'Departments',
   '/leave': 'Leave Management',
   '/payroll': 'Payroll',
+  '/attendance': 'Attendance',
+  '/performance': 'Performance & Growth',
+  '/settings': 'Settings',
+  '/profile': 'Profile',
 };
 
 const Navbar: React.FC = () => {
   const { user, logout, switchRole } = useAuth();
   const { isDark, toggle } = useTheme();
+  const { notifications, unreadCount, markRead, markAllRead, clearAll } = useNotifications();
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -52,10 +62,59 @@ const Navbar: React.FC = () => {
         </button>
 
         {/* Notifications */}
-        <button className="relative rounded-lg p-2 hover:bg-muted transition-colors">
-          <Bell size={18} />
-          <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-accent" />
-        </button>
+        <Popover>
+          <PopoverTrigger asChild>
+            <button className="relative rounded-lg p-2 hover:bg-muted transition-colors">
+              <Bell size={18} />
+              {unreadCount > 0 && (
+                <span className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-accent text-[10px] font-bold text-accent-foreground">
+                  {unreadCount > 9 ? '9+' : unreadCount}
+                </span>
+              )}
+            </button>
+          </PopoverTrigger>
+          <PopoverContent align="end" className="w-80 p-0">
+            <div className="flex items-center justify-between px-4 py-3 border-b">
+              <h4 className="font-semibold text-sm">Notifications</h4>
+              <div className="flex gap-1">
+                {unreadCount > 0 && (
+                  <Button variant="ghost" size="sm" className="text-xs h-7" onClick={markAllRead}>
+                    Mark all read
+                  </Button>
+                )}
+                {notifications.length > 0 && (
+                  <Button variant="ghost" size="sm" className="text-xs h-7" onClick={clearAll}>
+                    Clear
+                  </Button>
+                )}
+              </div>
+            </div>
+            <div className="max-h-[300px] overflow-y-auto">
+              {notifications.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-8">No notifications</p>
+              ) : (
+                notifications.map(n => (
+                  <div
+                    key={n.id}
+                    onClick={() => markRead(n.id)}
+                    className={`flex items-start gap-3 px-4 py-3 border-b last:border-0 cursor-pointer hover:bg-muted/50 transition-colors ${!n.read ? 'bg-primary/5' : ''}`}
+                  >
+                    <div className={`mt-1 h-2 w-2 rounded-full shrink-0 ${
+                      n.type === 'success' ? 'bg-success' :
+                      n.type === 'error' ? 'bg-destructive' :
+                      n.type === 'warning' ? 'bg-warning' : 'bg-info'
+                    }`} />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium">{n.title}</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">{n.message}</p>
+                      <p className="text-xs text-muted-foreground/60 mt-1">{n.time}</p>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </PopoverContent>
+        </Popover>
 
         {/* Profile dropdown */}
         <DropdownMenu>
