@@ -33,14 +33,26 @@ const LeavePage: React.FC = () => {
  // ✅ Fetch Leaves
 const fetchLeaves = async () => {
   try {
-    if (!user?.employeeId && !isManager) return;
+    if (!user) return;
 
-    const res = isManager
-      ? await leaveService.getAll()
-      : await leaveService.getByEmployee(user!.employeeId);
+    let res;
 
-    // 🔥 IMPORTANT FIX HERE
-    // setLeaves(res?.data?.content ?? []);
+    // ✅ If Admin or Manager → get all leaves
+    if (user.role === 'admin' || user.role === 'manager') {
+      res = await leaveService.getAll();
+    } 
+    // ✅ If Employee → get only their leaves
+    else {
+      if (!user.employeeId) {
+        toast.error("Employee ID not found");
+        return;
+      }
+      res = await leaveService.getByEmployee(user.employeeId);
+    }
+
+
+    // ✅ Spring Page response
+  setLeaves(res.content ?? []);
 
   } catch (error) {
     console.error('Fetch leaves error:', error);
@@ -91,23 +103,23 @@ const fetchLeaves = async () => {
 
   // ✅ Approve / Reject
   const updateStatus = async (id: string, status: 'APPROVED' | 'REJECTED') => {
-    try {
-      await leaveService.updateStatus(id, status);
-      toast.success(`Leave ${status.toLowerCase()}`);
-      await fetchLeaves();
-    } catch (error) {
-      console.error(error);
-      toast.error('Failed to update status');
+   try {
+    if (status === 'APPROVED') {
+      await leaveService.approve(id);
+    } else {
+      await leaveService.reject(id);
     }
+
+    toast.success(`Leave ${status.toLowerCase()}`);
+    await fetchLeaves();
+
+  } catch (error) {
+    console.error(error);
+    toast.error('Failed to update status');
+  }
   };
 
-  const statusStyle = (s: string) =>
-    s === 'APPROVED'
-      ? 'bg-success/10 text-success'
-      : s === 'REJECTED'
-      ? 'bg-destructive/10 text-destructive'
-      : 'bg-warning/10 text-warning';
-
+ 
 
   // ✅ Calendar modifiers
  const holidayDates = useMemo(() => {
@@ -128,6 +140,8 @@ const fetchLeaves = async () => {
     });
     return dates;
   }, [leaves]);
+
+  
 
   const pendingDates = useMemo(() => {
     const dates: Date[] = [];
@@ -152,6 +166,19 @@ const fetchLeaves = async () => {
     approved: { backgroundColor: '#dcfce7', color: '#16a34a', borderRadius: '50%' },
     pending: { backgroundColor: '#fef9c3', color: '#ca8a04', borderRadius: '50%' },
   };
+
+  const statusStyle = (s: string) => {
+  switch (s) {
+    case 'APPROVED':
+      return 'bg-success/10 text-success';
+    case 'REJECTED':
+      return 'bg-destructive/10 text-destructive';
+    case 'PENDING':
+      return 'bg-warning/10 text-warning';
+    default:
+      return 'bg-blue-900/10 text-blue-900'; // 🔥 Navy Blue
+  }
+};
 
   return (
     <div className="space-y-6">
@@ -185,13 +212,87 @@ const fetchLeaves = async () => {
 
   {/* Requests Tab */}
   <TabsContent value="requests">
-    {/* your table card here */}
-  </TabsContent>
+          <Card className="shadow-sm">
+            <CardContent className="p-0">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Employee</TableHead>
+                    <TableHead>Type</TableHead>
+                    <TableHead>From</TableHead>
+                    <TableHead>To</TableHead>
+                    <TableHead>Reason</TableHead>
+                    <TableHead>Status</TableHead>
+                    {isManager && <TableHead className="text-right">Actions</TableHead>}
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {leaves.map(l => (
+                    <TableRow key={l.id}>
+                      <TableCell className="font-medium">{l.employeeName}</TableCell>
+                      <TableCell className="capitalize">{l.leaveType}</TableCell>
+                      <TableCell>{l.startDate}</TableCell>
+                      <TableCell>{l.endDate}</TableCell>
+                      <TableCell className="max-w-[200px] truncate">{l.reason}</TableCell>
+                      <TableCell><span className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusStyle(l.status)}`}>{l.status}</span></TableCell>
+                      {isManager && (
+                        <TableCell className="text-right space-x-1">
+                          {l.status === 'PENDING' && <>
+                            {isManager && l.status === 'PENDING' && (
+                                      <>
+                                        <Button
+                                          variant="ghost"
+                                          size="icon"
+                                          onClick={() => updateStatus(l.id, 'APPROVED')}
+                                        >
+                                          <CheckCircle size={16} className="text-success" />
+                                        </Button>
+
+                                        <Button
+                                          variant="ghost"
+                                          size="icon"
+                                          onClick={() => updateStatus(l.id, 'REJECTED')}
+                                        >
+                                          <XCircle size={16} className="text-destructive" />
+                                        </Button>
+                                      </>
+                                    )}
+                                   </>}
+                        </TableCell>
+                      )}
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+
 
   {/* Leave Balance Tab */}
   <TabsContent value="balance">
-    {/* your balance cards here */}
-  </TabsContent>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {mockLeaveBalances.map(lb => (
+              <Card key={lb.type} className="shadow-sm">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium text-muted-foreground">{lb.type}</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="flex items-end justify-between">
+                    <span className="text-3xl font-bold">{lb.remaining}</span>
+                    <span className="text-sm text-muted-foreground">of {lb.total}</span>
+                  </div>
+                  <Progress value={(lb.used / lb.total) * 100} className="h-2" />
+                  <div className="flex justify-between text-xs text-muted-foreground">
+                    <span>Used: {lb.used}</span>
+                    <span>Remaining: {lb.remaining}</span>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </TabsContent>
 
   {/* Calendar Tab */}
   <TabsContent value="calendar">

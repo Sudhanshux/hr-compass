@@ -7,6 +7,372 @@ import { useAuth } from '@/contexts/AuthContext';
 import { attendanceService, AttendanceRecord, PunchRequest } from '@/services/attendance.service';
 import { useToast } from '@/hooks/use-toast';
 
+const AttendancePage: React.FC = () => {
+  const { user } = useAuth();
+  const { toast } = useToast();
+
+  const [record, setRecord]             = useState<AttendanceRecord | null>(null);
+  const [history, setHistory]           = useState<AttendanceRecord[]>([]);
+  const [loading, setLoading]           = useState(false);
+  const [geoLoading, setGeoLoading]     = useState(false);
+  const [geoError, setGeoError]         = useState<string | null>(null);
+  const [initialLoading, setInitial]    = useState(true);
+  const [currentGeo, setCurrentGeo]     = useState<GeoPoint | null>(null);
+  const [locating, setLocating]         = useState(false);
+
+  /* ── Fetch today + history on mount ── */
+ useEffect(() => {
+  if (!user?.employeeId) {
+    toast({
+      title: 'Punch In Failed',
+      description: 'Employee not found',
+      variant: 'destructive',
+    });
+    return;
+  }
+
+  (async () => {
+    try {
+      const [today, histRaw] = await Promise.all([
+        attendanceService.getToday(user.employeeId).catch(() => null),
+        attendanceService.getHistory(user.employeeId).catch(() => []),
+      ]);
+
+      setRecord(today);
+
+      // Cast to any first — avoids TS inferring 'never' from mismatched
+      // return type vs catch fallback. Then safely extract the array.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const raw = histRaw as any;
+      const histArray: AttendanceRecord[] = Array.isArray(raw)
+        ? raw                  // plain array (catch fallback or direct array response)
+        : Array.isArray(raw?.content)
+          ? raw.content        // Spring Page<T>  →  { content: [...], totalPages, ... }
+          : [];                // unknown shape   →  safe empty fallback
+
+      setHistory(histArray);
+
+    } finally {
+      setInitial(false);
+    }
+  })();
+}, [user?.employeeId]);
+ // re-runs once employeeId is available
+
+  /* ── Background GPS polling ── */
+  useEffect(() => {
+    if (!navigator.geolocation) return;
+    const poll = () => {
+      setLocating(true);
+      navigator.geolocation.getCurrentPosition(
+        pos => {
+          setCurrentGeo({ latitude: pos.coords.latitude, longitude: pos.coords.longitude, accuracy: pos.coords.accuracy });
+          setLocating(false);
+        },
+        () => setLocating(false),
+        { enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 },
+      );
+    };
+    poll();
+    const id = setInterval(poll, 30000);
+    return () => clearInterval(id);
+  }, []);
+
+  /* ── On-demand location for punch actions ── */
+  const getLocation = useCallback((): Promise<PunchRequest> => {
+    setGeoLoading(true);
+    setGeoError(null);
+    return new Promise((resolve, reject) => {
+      if (!navigator.geolocation) {
+        const msg = 'Geolocation not supported.';
+        setGeoError(msg); setGeoLoading(false); reject(new Error(msg)); return;
+      }
+      navigator.geolocation.getCurrentPosition(
+        pos => {
+          const geo: GeoPoint = { latitude: pos.coords.latitude, longitude: pos.coords.longitude, accuracy: pos.coords.accuracy };
+          setCurrentGeo(geo);
+          setGeoLoading(false);
+          resolve({ latitude: geo.latitude, longitude: geo.longitude });
+        },
+        err => {
+          setGeoLoading(false);
+          const msg = err.code === 1 ? 'Location permission denied. Enable it in browser settings.' :
+            err.code === 2 ? 'Location unavailable. Try again.' : 'Location request timed out.';
+          setGeoError(msg); reject(new Error(msg));
+        },
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 },
+      );
+    });
+  }, []);
+
+  const handlePunchIn = async () => {
+    console.log("Logged in user:", user);
+     if (!user?.employeeId) {
+      toast({
+        title: 'Punch In Failed',
+        description: 'Employee not found',
+        variant: 'destructive',
+      });
+      return;
+    }
+    try {
+      setLoading(true);
+      const loc = await getLocation();
+      const result = await attendanceService.punchIn(user.employeeId,loc);
+      setRecord(result);
+      toast({ title: '✓ Punched In', description: `Recorded at ${formatTime(result.punchInTime)}` });
+    } catch (err: any) {
+      toast({ title: 'Punch In Failed', description: err.message, variant: 'destructive' });
+    } finally { setLoading(false); }
+  };
+
+  const handlePunchOut = async () => {
+     if (!user?.employeeId) {
+      toast({
+        title: 'Punch In Failed',
+        description: 'Employee not found',
+        variant: 'destructive',
+      });
+      return;
+    }
+    try {
+      setLoading(true);
+      const loc = await getLocation();
+      const result = await attendanceService.punchOut(user.employeeId,loc);
+      setRecord(result);
+      toast({ title: '✓ Punched Out', description: `Total: ${result.workingHours?.toFixed(1)}h` });
+    } catch (err: any) {
+      toast({ title: 'Punch Out Failed', description: err.message, variant: 'destructive' });
+    } finally { setLoading(false); }
+  };
+
+  const isPunchedIn  = !!record?.punchInTime;
+  const isPunchedOut = !!record?.punchOutTime;
+
+  return (
+    <div className="min-h-screen bg-white text-slate-800 p-4 md:p-8 space-y-6">
+      <style>{`
+        @keyframes slide-up {
+          from { opacity: 0; transform: translateY(6px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+        .slide-up { animation: slide-up 0.3s ease forwards; }
+      `}</style>
+
+      {/* ── Header ── */}
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-800 tracking-tight">Attendance</h1>
+          <p className="text-slate-400 text-sm mt-0.5">{formatDateFull(new Date().toISOString())}</p>
+        </div>
+        <div className="text-right">
+          <LiveClock />
+          <div className="flex items-center justify-end gap-1.5 mt-1">
+            {locating ? (
+              <><Loader2 size={10} className="animate-spin text-blue-400" /><span className="text-[10px] text-blue-500">Locating…</span></>
+            ) : currentGeo ? (
+              <><div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" /><span className="text-[10px] text-emerald-600 font-medium">GPS Active</span></>
+            ) : (
+              <><WifiOff size={10} className="text-slate-300" /><span className="text-[10px] text-slate-400">No GPS</span></>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* ── Two-column layout ── */}
+      <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+
+        {/* Left — Punch card */}
+        <div className="lg:col-span-2 space-y-4">
+          <div className="rounded-2xl bg-white border border-slate-100 shadow-sm p-6 space-y-5">
+
+            {/* Status */}
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold uppercase tracking-widest text-slate-400">Today</span>
+              {isPunchedOut ? (
+                <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1 rounded-full bg-emerald-50 text-emerald-700">
+                  <CheckCircle2 size={12} />Day Complete
+                </span>
+              ) : isPunchedIn ? (
+                <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1 rounded-full bg-blue-50 text-blue-700">
+                  <Clock size={12} className="animate-pulse" />Working
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1 rounded-full bg-amber-50 text-amber-700">
+                  <AlertCircle size={12} />Not Started
+                </span>
+              )}
+            </div>
+
+            {initialLoading ? (
+              <div className="flex justify-center py-12">
+                <Loader2 className="animate-spin text-slate-300" size={28} />
+              </div>
+            ) : (
+              <>
+                {/* Punch time grid */}
+                <div className="grid grid-cols-2 gap-3">
+                  {[
+                    { label: 'Punch In',  time: record?.punchInTime  ?? null, accent: 'text-emerald-600', geo: record?.punchInLocation  as GeoPoint | undefined, dot: 'bg-emerald-500' },
+                    { label: 'Punch Out', time: record?.punchOutTime ?? null, accent: 'text-red-500',     geo: record?.punchOutLocation as GeoPoint | undefined, dot: 'bg-red-500' },
+                  ].map(({ label, time, accent, geo, dot }) => (
+                    <div key={label} className="rounded-xl bg-slate-50 border border-slate-100 p-4">
+                      <p className="text-[10px] uppercase tracking-widest font-semibold text-slate-400 mb-1">{label}</p>
+                      <p className={`text-lg font-mono font-bold ${time ? accent : 'text-slate-200'}`}>
+                        {formatTime(time)}
+                      </p>
+                      {geo && (
+                        <p className="text-[9px] text-slate-400 font-mono mt-1.5 flex items-center gap-1">
+                          <span className={`inline-block w-1 h-1 rounded-full ${dot}`} />
+                          {coordStr(geo)}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+
+                {/* Total hours */}
+                {record?.workingHours != null && (
+                  <div className="flex items-center justify-between text-sm slide-up">
+                    <span className="text-slate-400">Total Hours</span>
+                    <span className="font-bold text-slate-800 tabular-nums">{record.workingHours.toFixed(1)}h</span>
+                  </div>
+                )}
+
+                {/* Progress bar */}
+                {record?.workingHours != null && (
+                  <div className="slide-up">
+                    <div className="flex justify-between text-[10px] text-slate-400 mb-1.5">
+                      <span>Day Progress</span>
+                      <span>{Math.round(Math.min(100, (record.workingHours / 8) * 100))}% of 8h</span>
+                    </div>
+                    <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                      <div
+                        className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-blue-500 transition-all duration-700"
+                        style={{ width: `${Math.min(100, (record.workingHours / 8) * 100)}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Geo error */}
+                {geoError && (
+                  <div className="flex items-start gap-2 rounded-lg bg-red-50 border border-red-100 p-3 text-xs text-red-600 slide-up">
+                    <AlertCircle size={13} className="shrink-0 mt-0.5" />{geoError}
+                  </div>
+                )}
+
+                {/* Action button */}
+                <div className="pt-1">
+                  {!isPunchedIn ? (
+                    <button
+                      onClick={handlePunchIn}
+                      disabled={loading || geoLoading}
+                      className="w-full rounded-xl py-3.5 font-semibold text-sm bg-emerald-500 hover:bg-emerald-600 active:bg-emerald-700 text-white disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-sm shadow-emerald-200 transition-colors"
+                    >
+                      {(loading || geoLoading) ? <Loader2 size={17} className="animate-spin" /> : <LogIn size={17} />}
+                      {geoLoading ? 'Getting Location…' : loading ? 'Recording…' : 'Punch In'}
+                    </button>
+                  ) : !isPunchedOut ? (
+                    <button
+                      onClick={handlePunchOut}
+                      disabled={loading || geoLoading}
+                      className="w-full rounded-xl py-3.5 font-semibold text-sm bg-red-500 hover:bg-red-600 active:bg-red-700 text-white disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-sm shadow-red-200 transition-colors"
+                    >
+                      {(loading || geoLoading) ? <Loader2 size={17} className="animate-spin" /> : <LogOut size={17} />}
+                      {geoLoading ? 'Getting Location…' : loading ? 'Recording…' : 'Punch Out'}
+                    </button>
+                  ) : (
+                    <div className="flex items-center justify-center gap-2 rounded-xl py-3.5 bg-slate-50 border border-slate-100 text-slate-400 text-sm font-medium">
+                      <CheckCircle2 size={16} className="text-emerald-500" />Day Complete
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* Right — Map + Previous Attendance */}
+        <div className="lg:col-span-3 space-y-4">
+
+          {/* Map card */}
+          <div className="rounded-2xl bg-white border border-slate-100 shadow-sm overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <Crosshair size={14} className="text-slate-400" />
+                <span className="text-sm font-semibold text-slate-700">Location Map</span>
+                <span className="text-[10px] text-blue-600 bg-blue-50 border border-blue-100 rounded px-1.5 py-0.5 font-medium">● 20m radius</span>
+              </div>
+              <div className="flex items-center gap-3">
+                {record?.punchInLocation && (
+                  <span className="flex items-center gap-1 text-[10px] text-emerald-600 font-medium">
+                    <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />In saved
+                  </span>
+                )}
+                {record?.punchOutLocation && (
+                  <span className="flex items-center gap-1 text-[10px] text-red-500 font-medium">
+                    <div className="w-1.5 h-1.5 rounded-full bg-red-500" />Out saved
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <div className="p-3">
+              <MapView
+                punchIn={record?.punchInLocation as GeoPoint | undefined}
+                punchOut={record?.punchOutLocation as GeoPoint | undefined}
+                current={currentGeo}
+                height={300}
+              />
+            </div>
+
+            {/* Location detail rows below map */}
+            {(record?.punchInLocation || record?.punchOutLocation || currentGeo) && (
+              <div className="border-t border-slate-100 divide-y divide-slate-50">
+                {currentGeo && !isPunchedIn && (
+                  <div className="flex items-center gap-3 px-5 py-3">
+                    <div className="w-7 h-7 rounded-full bg-blue-500 flex items-center justify-center text-white p-1.5 shrink-0">
+                      <HumanIcon className="w-full h-full" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-semibold text-slate-600">Current Position</p>
+                      <p className="text-[10px] text-slate-400 font-mono mt-0.5">{coordStr(currentGeo)}</p>
+                    </div>
+                    {currentGeo.accuracy && (
+                      <span className="text-[10px] text-slate-400 shrink-0">±{Math.round(currentGeo.accuracy)}m</span>
+                    )}
+                  </div>
+                )}
+                {record?.punchInLocation && (
+                  <LocationRow
+                    label="Punch In Location"
+                    geo={record.punchInLocation as GeoPoint}
+                    time={record.punchInTime}
+                    bgColor="bg-emerald-500"
+                  />
+                )}
+                {record?.punchOutLocation && (
+                  <LocationRow
+                    label="Punch Out Location"
+                    geo={record.punchOutLocation as GeoPoint}
+                    time={record.punchOutTime}
+                    bgColor="bg-red-500"
+                  />
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Previous Attendance */}
+          <PreviousAttendance history={history} />
+        </div>
+      </div>
+    </div>
+  );
+};
+
+
 /* ─── Types ──────────────────────────────────────────────────────────────── */
 interface GeoPoint { latitude: number; longitude: number; accuracy?: number }
 
@@ -202,10 +568,10 @@ const STATUS_CFG: Record<string, { label: string; bg: string; text: string; dot:
 
 const PreviousAttendance: React.FC<{ history: AttendanceRecord[] }> = ({ history }) => {
   const counts = {
-    present:  history.filter(r => r.status === 'present').length,
-    halfDay:  history.filter(r => r.status === 'half-day').length,
-    onLeave:  history.filter(r => r.status === 'on-leave').length,
-    absent:   history.filter(r => r.status === 'absent').length,
+    present:  history.filter(r => r.status === 'PRESENT').length,
+    halfDay:  history.filter(r => r.status === 'ABSENT').length,
+    onLeave:  history.filter(r => r.status === 'ON_LEAVE').length,
+    absent:   history.filter(r => r.status === 'ABSENT').length,
   };
   const total = history.length;
   const pct = total > 0 ? Math.round((counts.present / total) * 100) : 0;
@@ -285,8 +651,8 @@ const PreviousAttendance: React.FC<{ history: AttendanceRecord[] }> = ({ history
                     </p>
                     <p className="text-[10px] text-slate-400 font-mono mt-0.5">
                       {formatTime(rec.punchInTime)} → {formatTime(rec.punchOutTime)}
-                      {rec.totalHours != null && (
-                        <span className="ml-1.5 text-slate-300">· {rec.totalHours.toFixed(1)}h</span>
+                      {rec.workingHours != null && (
+                        <span className="ml-1.5 text-slate-300">· {rec.workingHours.toFixed(1)}h</span>
                       )}
                     </p>
                   </div>
@@ -307,344 +673,6 @@ const PreviousAttendance: React.FC<{ history: AttendanceRecord[] }> = ({ history
 };
 
 /* ─── Main Page ──────────────────────────────────────────────────────────── */
-const AttendancePage: React.FC = () => {
-  const { user } = useAuth();
-  const { toast } = useToast();
 
-  const [record, setRecord]             = useState<AttendanceRecord | null>(null);
-  const [history, setHistory]           = useState<AttendanceRecord[]>([]);
-  const [loading, setLoading]           = useState(false);
-  const [geoLoading, setGeoLoading]     = useState(false);
-  const [geoError, setGeoError]         = useState<string | null>(null);
-  const [initialLoading, setInitial]    = useState(true);
-  const [currentGeo, setCurrentGeo]     = useState<GeoPoint | null>(null);
-  const [locating, setLocating]         = useState(false);
-
-  /* ── Fetch today + history on mount ── */
-  useEffect(() => {
-    (async () => {
-      try {
-        const [today, hist] = await Promise.all([
-          attendanceService.getToday().catch(() => null),
-          attendanceService.getHistory().catch(() => []),
-        ]);
-        setRecord(today);
-        setHistory(hist);
-      } finally { setInitial(false); }
-    })();
-  }, []);
-
-  /* ── Background GPS polling ── */
-  useEffect(() => {
-    if (!navigator.geolocation) return;
-    const poll = () => {
-      setLocating(true);
-      navigator.geolocation.getCurrentPosition(
-        pos => {
-          setCurrentGeo({ latitude: pos.coords.latitude, longitude: pos.coords.longitude, accuracy: pos.coords.accuracy });
-          setLocating(false);
-        },
-        () => setLocating(false),
-        { enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 },
-      );
-    };
-    poll();
-    const id = setInterval(poll, 30000);
-    return () => clearInterval(id);
-  }, []);
-
-  /* ── On-demand location for punch actions ── */
-  const getLocation = useCallback((): Promise<PunchRequest> => {
-    setGeoLoading(true);
-    setGeoError(null);
-    return new Promise((resolve, reject) => {
-      if (!navigator.geolocation) {
-        const msg = 'Geolocation not supported.';
-        setGeoError(msg); setGeoLoading(false); reject(new Error(msg)); return;
-      }
-      navigator.geolocation.getCurrentPosition(
-        pos => {
-          const geo: GeoPoint = { latitude: pos.coords.latitude, longitude: pos.coords.longitude, accuracy: pos.coords.accuracy };
-          setCurrentGeo(geo);
-          setGeoLoading(false);
-          resolve({ latitude: geo.latitude, longitude: geo.longitude });
-        },
-        err => {
-          setGeoLoading(false);
-          const msg = err.code === 1 ? 'Location permission denied. Enable it in browser settings.' :
-            err.code === 2 ? 'Location unavailable. Try again.' : 'Location request timed out.';
-          setGeoError(msg); reject(new Error(msg));
-        },
-        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 },
-      );
-    });
-  }, []);
-
-  const handlePunchIn = async () => {
-    console.log("Logged in user:", user);
-     if (!user?.employeeId) {
-      toast({
-        title: 'Punch In Failed',
-        description: 'Employee not found',
-        variant: 'destructive',
-      });
-      return;
-    }
-    try {
-      setLoading(true);
-      const loc = await getLocation();
-      const result = await attendanceService.punchIn(user.employeeId,loc);
-      setRecord(result);
-      toast({ title: '✓ Punched In', description: `Recorded at ${formatTime(result.punchInTime)}` });
-    } catch (err: any) {
-      toast({ title: 'Punch In Failed', description: err.message, variant: 'destructive' });
-    } finally { setLoading(false); }
-  };
-
-  const handlePunchOut = async () => {
-     if (!user?.employeeId) {
-      toast({
-        title: 'Punch In Failed',
-        description: 'Employee not found',
-        variant: 'destructive',
-      });
-      return;
-    }
-    try {
-      setLoading(true);
-      const loc = await getLocation();
-      const result = await attendanceService.punchOut(user.employeeId,loc);
-      setRecord(result);
-      toast({ title: '✓ Punched Out', description: `Total: ${result.totalHours?.toFixed(1)}h` });
-    } catch (err: any) {
-      toast({ title: 'Punch Out Failed', description: err.message, variant: 'destructive' });
-    } finally { setLoading(false); }
-  };
-
-  const isPunchedIn  = !!record?.punchInTime;
-  const isPunchedOut = !!record?.punchOutTime;
-
-  return (
-    <div className="min-h-screen bg-white text-slate-800 p-4 md:p-8 space-y-6">
-      <style>{`
-        @keyframes slide-up {
-          from { opacity: 0; transform: translateY(6px); }
-          to   { opacity: 1; transform: translateY(0); }
-        }
-        .slide-up { animation: slide-up 0.3s ease forwards; }
-      `}</style>
-
-      {/* ── Header ── */}
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-800 tracking-tight">Attendance</h1>
-          <p className="text-slate-400 text-sm mt-0.5">{formatDateFull(new Date().toISOString())}</p>
-        </div>
-        <div className="text-right">
-          <LiveClock />
-          <div className="flex items-center justify-end gap-1.5 mt-1">
-            {locating ? (
-              <><Loader2 size={10} className="animate-spin text-blue-400" /><span className="text-[10px] text-blue-500">Locating…</span></>
-            ) : currentGeo ? (
-              <><div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" /><span className="text-[10px] text-emerald-600 font-medium">GPS Active</span></>
-            ) : (
-              <><WifiOff size={10} className="text-slate-300" /><span className="text-[10px] text-slate-400">No GPS</span></>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* ── Two-column layout ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-
-        {/* Left — Punch card */}
-        <div className="lg:col-span-2 space-y-4">
-          <div className="rounded-2xl bg-white border border-slate-100 shadow-sm p-6 space-y-5">
-
-            {/* Status */}
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold uppercase tracking-widest text-slate-400">Today</span>
-              {isPunchedOut ? (
-                <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1 rounded-full bg-emerald-50 text-emerald-700">
-                  <CheckCircle2 size={12} />Day Complete
-                </span>
-              ) : isPunchedIn ? (
-                <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1 rounded-full bg-blue-50 text-blue-700">
-                  <Clock size={12} className="animate-pulse" />Working
-                </span>
-              ) : (
-                <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1 rounded-full bg-amber-50 text-amber-700">
-                  <AlertCircle size={12} />Not Started
-                </span>
-              )}
-            </div>
-
-            {initialLoading ? (
-              <div className="flex justify-center py-12">
-                <Loader2 className="animate-spin text-slate-300" size={28} />
-              </div>
-            ) : (
-              <>
-                {/* Punch time grid */}
-                <div className="grid grid-cols-2 gap-3">
-                  {[
-                    { label: 'Punch In',  time: record?.punchInTime  ?? null, accent: 'text-emerald-600', geo: record?.punchInLocation  as GeoPoint | undefined, dot: 'bg-emerald-500' },
-                    { label: 'Punch Out', time: record?.punchOutTime ?? null, accent: 'text-red-500',     geo: record?.punchOutLocation as GeoPoint | undefined, dot: 'bg-red-500' },
-                  ].map(({ label, time, accent, geo, dot }) => (
-                    <div key={label} className="rounded-xl bg-slate-50 border border-slate-100 p-4">
-                      <p className="text-[10px] uppercase tracking-widest font-semibold text-slate-400 mb-1">{label}</p>
-                      <p className={`text-lg font-mono font-bold ${time ? accent : 'text-slate-200'}`}>
-                        {formatTime(time)}
-                      </p>
-                      {geo && (
-                        <p className="text-[9px] text-slate-400 font-mono mt-1.5 flex items-center gap-1">
-                          <span className={`inline-block w-1 h-1 rounded-full ${dot}`} />
-                          {coordStr(geo)}
-                        </p>
-                      )}
-                    </div>
-                  ))}
-                </div>
-
-                {/* Total hours */}
-                {record?.totalHours != null && (
-                  <div className="flex items-center justify-between text-sm slide-up">
-                    <span className="text-slate-400">Total Hours</span>
-                    <span className="font-bold text-slate-800 tabular-nums">{record.totalHours.toFixed(1)}h</span>
-                  </div>
-                )}
-
-                {/* Progress bar */}
-                {record?.totalHours != null && (
-                  <div className="slide-up">
-                    <div className="flex justify-between text-[10px] text-slate-400 mb-1.5">
-                      <span>Day Progress</span>
-                      <span>{Math.round(Math.min(100, (record.totalHours / 8) * 100))}% of 8h</span>
-                    </div>
-                    <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                      <div
-                        className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-blue-500 transition-all duration-700"
-                        style={{ width: `${Math.min(100, (record.totalHours / 8) * 100)}%` }}
-                      />
-                    </div>
-                  </div>
-                )}
-
-                {/* Geo error */}
-                {geoError && (
-                  <div className="flex items-start gap-2 rounded-lg bg-red-50 border border-red-100 p-3 text-xs text-red-600 slide-up">
-                    <AlertCircle size={13} className="shrink-0 mt-0.5" />{geoError}
-                  </div>
-                )}
-
-                {/* Action button */}
-                <div className="pt-1">
-                  {!isPunchedIn ? (
-                    <button
-                      onClick={handlePunchIn}
-                      disabled={loading || geoLoading}
-                      className="w-full rounded-xl py-3.5 font-semibold text-sm bg-emerald-500 hover:bg-emerald-600 active:bg-emerald-700 text-white disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-sm shadow-emerald-200 transition-colors"
-                    >
-                      {(loading || geoLoading) ? <Loader2 size={17} className="animate-spin" /> : <LogIn size={17} />}
-                      {geoLoading ? 'Getting Location…' : loading ? 'Recording…' : 'Punch In'}
-                    </button>
-                  ) : !isPunchedOut ? (
-                    <button
-                      onClick={handlePunchOut}
-                      disabled={loading || geoLoading}
-                      className="w-full rounded-xl py-3.5 font-semibold text-sm bg-red-500 hover:bg-red-600 active:bg-red-700 text-white disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-sm shadow-red-200 transition-colors"
-                    >
-                      {(loading || geoLoading) ? <Loader2 size={17} className="animate-spin" /> : <LogOut size={17} />}
-                      {geoLoading ? 'Getting Location…' : loading ? 'Recording…' : 'Punch Out'}
-                    </button>
-                  ) : (
-                    <div className="flex items-center justify-center gap-2 rounded-xl py-3.5 bg-slate-50 border border-slate-100 text-slate-400 text-sm font-medium">
-                      <CheckCircle2 size={16} className="text-emerald-500" />Day Complete
-                    </div>
-                  )}
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-
-        {/* Right — Map + Previous Attendance */}
-        <div className="lg:col-span-3 space-y-4">
-
-          {/* Map card */}
-          <div className="rounded-2xl bg-white border border-slate-100 shadow-sm overflow-hidden">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
-              <div className="flex items-center gap-2">
-                <Crosshair size={14} className="text-slate-400" />
-                <span className="text-sm font-semibold text-slate-700">Location Map</span>
-                <span className="text-[10px] text-blue-600 bg-blue-50 border border-blue-100 rounded px-1.5 py-0.5 font-medium">● 20m radius</span>
-              </div>
-              <div className="flex items-center gap-3">
-                {record?.punchInLocation && (
-                  <span className="flex items-center gap-1 text-[10px] text-emerald-600 font-medium">
-                    <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />In saved
-                  </span>
-                )}
-                {record?.punchOutLocation && (
-                  <span className="flex items-center gap-1 text-[10px] text-red-500 font-medium">
-                    <div className="w-1.5 h-1.5 rounded-full bg-red-500" />Out saved
-                  </span>
-                )}
-              </div>
-            </div>
-
-            <div className="p-3">
-              <MapView
-                punchIn={record?.punchInLocation as GeoPoint | undefined}
-                punchOut={record?.punchOutLocation as GeoPoint | undefined}
-                current={currentGeo}
-                height={300}
-              />
-            </div>
-
-            {/* Location detail rows below map */}
-            {(record?.punchInLocation || record?.punchOutLocation || currentGeo) && (
-              <div className="border-t border-slate-100 divide-y divide-slate-50">
-                {currentGeo && !isPunchedIn && (
-                  <div className="flex items-center gap-3 px-5 py-3">
-                    <div className="w-7 h-7 rounded-full bg-blue-500 flex items-center justify-center text-white p-1.5 shrink-0">
-                      <HumanIcon className="w-full h-full" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-semibold text-slate-600">Current Position</p>
-                      <p className="text-[10px] text-slate-400 font-mono mt-0.5">{coordStr(currentGeo)}</p>
-                    </div>
-                    {currentGeo.accuracy && (
-                      <span className="text-[10px] text-slate-400 shrink-0">±{Math.round(currentGeo.accuracy)}m</span>
-                    )}
-                  </div>
-                )}
-                {record?.punchInLocation && (
-                  <LocationRow
-                    label="Punch In Location"
-                    geo={record.punchInLocation as GeoPoint}
-                    time={record.punchInTime}
-                    bgColor="bg-emerald-500"
-                  />
-                )}
-                {record?.punchOutLocation && (
-                  <LocationRow
-                    label="Punch Out Location"
-                    geo={record.punchOutLocation as GeoPoint}
-                    time={record.punchOutTime}
-                    bgColor="bg-red-500"
-                  />
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Previous Attendance */}
-          <PreviousAttendance history={history} />
-        </div>
-      </div>
-    </div>
-  );
-};
 
 export default AttendancePage;

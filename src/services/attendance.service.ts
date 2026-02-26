@@ -9,7 +9,7 @@ export interface AttendanceRecord {
   punchOutTime: string | null;
   punchInLocation: { latitude: number; longitude: number } | null;
   punchOutLocation: { latitude: number; longitude: number } | null;
-  status: 'present' | 'absent' | 'half-day' | 'on-leave';
+  status: 'PRESENT' | 'ABSENT' | 'HALF_DAY' | 'ON_LEAVE';
   totalHours: number | null;
 }
 
@@ -18,12 +18,13 @@ export interface PunchRequest {
   longitude: number;
 }
 
+
 export const attendanceService = {
-  getToday: () => apiClient.get<AttendanceRecord>('/attendance/today'),
+  getToday: (employeeId: string) =>apiClient.get<AttendanceRecord>(`/attendance/today/${employeeId}`),
   punchIn: (employeeId: string,data: PunchRequest) => apiClient.post<AttendanceRecord>(`/attendance/punch-in/${employeeId}`, data),
-  punchOut: (employeeId: string,data: PunchRequest) => apiClient.post<AttendanceRecord>(`/attendance/punch-out/${employeeId}`, data),
-  getHistory: (params?: { page?: number; size?: number; month?: string }) =>
-    apiClient.get<AttendanceRecord[]>('/attendance/history', { params: params as Record<string, string | number | boolean> }),
+  punchOut: (employeeId: string,data: PunchRequest) => apiClient.put<AttendanceRecord>(`/attendance/punch-out/${employeeId}`, data),
+  getHistory: (employeeId : string,params?: { page?: number; size?: number; month?: string }) =>
+    apiClient.get<AttendanceRecord[]>(`/attendance/employee/${employeeId}`, { params: params as Record<string, string | number | boolean> }),
   getByEmployee: (employeeId: string) =>
     apiClient.get<AttendanceRecord[]>(`/attendance/employee/${employeeId}`),
 };

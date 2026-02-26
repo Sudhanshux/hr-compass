@@ -14,7 +14,7 @@ export const leaveService = {
   apiClient.get<PageResponse<LeaveRequest>>('/leaves/pending'),
 
   getByEmployee: (employeeId: string) =>
-    apiClient.get<LeaveRequest[]>(`/leaves/employee/${employeeId}`),
+    apiClient.get<PageResponse<LeaveRequest>>(`/leaves/employee/${employeeId}`),
 
 apply: (
   employeeId: string,
@@ -22,6 +22,8 @@ apply: (
 ) =>
   apiClient.post<LeaveRequest>(`/leaves/apply/${employeeId}`, data),
 
-  updateStatus: (id: string, status: 'APPROVED' | 'REJECTED') =>
-    apiClient.patch<LeaveRequest>(`/leaves/${id}/status`, { status }),
+  approve: (id: string) =>
+    apiClient.put<LeaveRequest>(`/leaves/${id}/approve`),
+  reject: (id: string) =>
+    apiClient.put<LeaveRequest>(`/leaves/${id}/reject`),
 };
