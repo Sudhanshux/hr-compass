@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, Users, Building2, CalendarDays, DollarSign, Clock,
-  ChevronLeft, ChevronRight, LogOut, Settings, TrendingUp
+  ChevronLeft, ChevronRight, LogOut, Settings, TrendingUp, UserPlus
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
@@ -15,6 +15,7 @@ const navItems = [
   { to: '/payroll', label: 'Payroll', icon: DollarSign },
   { to: '/attendance', label: 'Attendance', icon: Clock },
   { to: '/performance', label: 'Performance', icon: TrendingUp },
+  { to: '/onboarding', label: 'Onboarding', icon: UserPlus, minRole: 'manager' as const },
   { to: '/settings', label: 'Settings', icon: Settings, minRole: 'admin' as const },
 ];
 

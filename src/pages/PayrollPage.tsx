@@ -3,14 +3,23 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
-import { DollarSign, Eye, Printer, X } from 'lucide-react';
+import { DollarSign, Eye, Printer, X, Lock } from 'lucide-react';
 import { mockPayslips } from '@/data/mock-data';
 import { PayslipData } from '@/types/models';
+import { useAuth } from '@/contexts/AuthContext';
+import { usePermissions } from '@/hooks/usePermissions';
 
 const PayrollPage: React.FC = () => {
+  const { user } = useAuth();
+  const { canViewAllPayslips } = usePermissions();
   const [viewOpen, setViewOpen] = useState(false);
   const [viewing, setViewing] = useState<PayslipData | null>(null);
   const payslipRef = useRef<HTMLDivElement>(null);
+
+  // Filter payslips based on role
+  const visiblePayslips = canViewAllPayslips
+    ? mockPayslips
+    : mockPayslips.filter(p => p.employeeId === user?.id || p.employeeName === user?.name);
 
   const openView = (p: PayslipData) => { setViewing(p); setViewOpen(true); };
 
@@ -23,20 +32,9 @@ const PayrollPage: React.FC = () => {
       <style>
         body { font-family: 'Segoe UI', Arial, sans-serif; margin: 0; padding: 40px; color: #1a1a1a; }
         .payslip { max-width: 700px; margin: 0 auto; }
-        .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 3px solid #4F46E5; padding-bottom: 16px; margin-bottom: 24px; }
-        .company { font-size: 22px; font-weight: 700; color: #4F46E5; }
-        .subtitle { font-size: 12px; color: #666; margin-top: 4px; }
-        .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 24px; }
-        .info-item label { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; }
-        .info-item p { font-size: 14px; font-weight: 500; margin: 2px 0 0; }
         table { width: 100%; border-collapse: collapse; margin-bottom: 24px; }
         th { background: #f3f4f6; text-align: left; padding: 10px 14px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; color: #555; border-bottom: 2px solid #e5e7eb; }
         td { padding: 10px 14px; font-size: 14px; border-bottom: 1px solid #f0f0f0; }
-        .amount { text-align: right; font-weight: 500; }
-        .deduction { color: #dc2626; }
-        .total-row { border-top: 2px solid #4F46E5; }
-        .total-row td { font-weight: 700; font-size: 16px; padding-top: 14px; }
-        .footer { text-align: center; font-size: 11px; color: #999; margin-top: 40px; padding-top: 16px; border-top: 1px solid #eee; }
         @media print { body { padding: 20px; } }
       </style></head><body>
       ${payslipRef.current.innerHTML}
@@ -55,62 +53,77 @@ const PayrollPage: React.FC = () => {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold">Payroll</h1>
-        <p className="text-sm text-muted-foreground">Salary structure & payslips</p>
+        <p className="text-sm text-muted-foreground">
+          {canViewAllPayslips ? 'Salary structure & payslips' : 'Your payslips'}
+        </p>
       </div>
 
-      {/* Summary cards */}
-      <div className="grid gap-4 sm:grid-cols-3">
-        {[
-          { label: 'Total Payroll', value: '₹45,650', desc: 'This month' },
-          { label: 'Avg Salary', value: '₹8,500', desc: 'Per employee' },
-          { label: 'Employees Paid', value: '3 / 10', desc: 'February 2026' },
-        ].map(c => (
-          <Card key={c.label} className="shadow-sm">
-            <CardContent className="flex items-center gap-4 p-5">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg gradient-primary text-white">
-                <DollarSign size={18} />
-              </div>
-              <div>
-                <p className="text-sm text-muted-foreground">{c.label}</p>
-                <p className="text-xl font-bold">{c.value}</p>
-                <p className="text-xs text-muted-foreground">{c.desc}</p>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+      {/* Summary cards - admin/manager only */}
+      {canViewAllPayslips && (
+        <div className="grid gap-4 sm:grid-cols-3">
+          {[
+            { label: 'Total Payroll', value: '$45,650', desc: 'This month' },
+            { label: 'Avg Salary', value: '$8,500', desc: 'Per employee' },
+            { label: 'Employees Paid', value: '3 / 10', desc: 'February 2026' },
+          ].map(c => (
+            <Card key={c.label} className="shadow-sm">
+              <CardContent className="flex items-center gap-4 p-5">
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg gradient-primary text-primary-foreground">
+                  <DollarSign size={18} />
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">{c.label}</p>
+                  <p className="text-xl font-bold">{c.value}</p>
+                  <p className="text-xs text-muted-foreground">{c.desc}</p>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
 
-      <Card className="shadow-sm">
-        <CardHeader><CardTitle className="text-base">Payslips — February 2026</CardTitle></CardHeader>
-        <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Employee</TableHead>
-                <TableHead>Basic</TableHead>
-                <TableHead>HRA</TableHead>
-                <TableHead>Deductions</TableHead>
-                <TableHead>Net Salary</TableHead>
-                <TableHead className="text-right">View</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {mockPayslips.map(p => (
-                <TableRow key={p.id}>
-                  <TableCell className="font-medium">{p.employeeName}</TableCell>
-                  <TableCell>₹{p.basicSalary.toLocaleString()}</TableCell>
-                  <TableCell>₹{p.hra.toLocaleString()}</TableCell>
-                  <TableCell className="text-destructive">₹{(p.tax + p.providentFund).toLocaleString()}</TableCell>
-                  <TableCell className="font-semibold">₹{p.netSalary.toLocaleString()}</TableCell>
-                  <TableCell className="text-right">
-                    <Button variant="ghost" size="icon" onClick={() => openView(p)}><Eye size={16} /></Button>
-                  </TableCell>
+      {visiblePayslips.length === 0 ? (
+        <Card className="shadow-sm">
+          <CardContent className="p-10 text-center">
+            <Lock size={40} className="mx-auto text-muted-foreground mb-3" />
+            <p className="text-muted-foreground">No payslips available for your account.</p>
+          </CardContent>
+        </Card>
+      ) : (
+        <Card className="shadow-sm">
+          <CardHeader><CardTitle className="text-base">
+            {canViewAllPayslips ? 'Payslips — February 2026' : 'My Payslips'}
+          </CardTitle></CardHeader>
+          <CardContent className="p-0">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Employee</TableHead>
+                  <TableHead>Basic</TableHead>
+                  <TableHead>HRA</TableHead>
+                  <TableHead>Deductions</TableHead>
+                  <TableHead>Net Salary</TableHead>
+                  <TableHead className="text-right">View</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+              </TableHeader>
+              <TableBody>
+                {visiblePayslips.map(p => (
+                  <TableRow key={p.id}>
+                    <TableCell className="font-medium">{p.employeeName}</TableCell>
+                    <TableCell>${p.basicSalary.toLocaleString()}</TableCell>
+                    <TableCell>${p.hra.toLocaleString()}</TableCell>
+                    <TableCell className="text-destructive">${(p.tax + p.providentFund).toLocaleString()}</TableCell>
+                    <TableCell className="font-semibold">${p.netSalary.toLocaleString()}</TableCell>
+                    <TableCell className="text-right">
+                      <Button variant="ghost" size="icon" onClick={() => openView(p)}><Eye size={16} /></Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
 
       {/* PDF-like Payslip Preview */}
       <Dialog open={viewOpen} onOpenChange={setViewOpen}>
@@ -131,7 +144,7 @@ const PayrollPage: React.FC = () => {
             <div className="p-8 max-h-[80vh] overflow-y-auto">
               <div ref={payslipRef} className="payslip">
                 {/* Header */}
-                <div className="header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '3px solid hsl(var(--primary))', paddingBottom: '16px', marginBottom: '24px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '3px solid hsl(var(--primary))', paddingBottom: '16px', marginBottom: '24px' }}>
                   <div>
                     <div style={{ fontSize: '22px', fontWeight: 700, color: 'hsl(var(--primary))' }}>HRMS Corp.</div>
                     <div style={{ fontSize: '12px', color: 'hsl(var(--muted-foreground))' }}>123 Business Ave, Suite 100</div>
@@ -159,7 +172,7 @@ const PayrollPage: React.FC = () => {
                   ))}
                 </div>
 
-                {/* Earnings Table */}
+                {/* Earnings */}
                 <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '24px' }}>
                   <thead>
                     <tr style={{ background: 'hsl(var(--muted))' }}>
@@ -186,7 +199,7 @@ const PayrollPage: React.FC = () => {
                   </tbody>
                 </table>
 
-                {/* Deductions Table */}
+                {/* Deductions */}
                 <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '24px' }}>
                   <thead>
                     <tr style={{ background: 'hsl(var(--muted))' }}>
@@ -217,7 +230,6 @@ const PayrollPage: React.FC = () => {
                   <span style={{ fontSize: '24px', fontWeight: 700, color: 'hsl(var(--primary))' }}>${viewing.netSalary.toLocaleString()}</span>
                 </div>
 
-                {/* Footer */}
                 <div style={{ textAlign: 'center', fontSize: '11px', color: 'hsl(var(--muted-foreground))', marginTop: '40px', paddingTop: '16px', borderTop: '1px solid hsl(var(--border))' }}>
                   This is a computer-generated payslip and does not require a signature.
                 </div>
