@@ -18,11 +18,12 @@ import { mockLeaveBalances, publicHolidays } from '@/data/leave-balance';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
 import { useNotifications } from '@/contexts/NotificationContext';
+import { usePermissions } from '@/hooks/usePermissions';
 
 const LeavePage: React.FC = () => {
   const { user } = useAuth();
   const { addNotification } = useNotifications();
-  const isManager = user?.role === 'admin' || user?.role === 'manager';
+  const { canApproveLeave } = usePermissions();
   const [leaves, setLeaves] = useState<LeaveRequest[]>(mockLeaveRequests);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState({ type: 'casual' as LeaveRequest['type'], startDate: '', endDate: '', reason: '' });
@@ -122,7 +123,7 @@ const LeavePage: React.FC = () => {
                     <TableHead>To</TableHead>
                     <TableHead>Reason</TableHead>
                     <TableHead>Status</TableHead>
-                    {isManager && <TableHead className="text-right">Actions</TableHead>}
+                    {canApproveLeave && <TableHead className="text-right">Actions</TableHead>}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -134,7 +135,7 @@ const LeavePage: React.FC = () => {
                       <TableCell>{l.endDate}</TableCell>
                       <TableCell className="max-w-[200px] truncate">{l.reason}</TableCell>
                       <TableCell><span className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusStyle(l.status)}`}>{l.status}</span></TableCell>
-                      {isManager && (
+                      {canApproveLeave && (
                         <TableCell className="text-right space-x-1">
                           {l.status === 'pending' && <>
                             <Button variant="ghost" size="icon" onClick={() => updateStatus(l.id, 'approved')}><CheckCircle size={16} className="text-success" /></Button>

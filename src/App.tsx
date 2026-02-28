@@ -17,6 +17,7 @@ import AttendancePage from "@/pages/AttendancePage";
 import SettingsPage from "@/pages/SettingsPage";
 import ProfilePage from "@/pages/ProfilePage";
 import PerformancePage from "@/pages/PerformancePage";
+import OnboardingPage from "@/pages/OnboardingPage";
 import NotFound from "@/pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -52,6 +53,7 @@ const App = () => (
                 <Route path="/attendance" element={<AttendancePage />} />
                 <Route path="/performance" element={<PerformancePage />} />
                 <Route path="/settings" element={<SettingsPage />} />
+                <Route path="/onboarding" element={<OnboardingPage />} />
                 <Route path="/profile" element={<ProfilePage />} />
               </Route>
               <Route path="*" element={<NotFound />} />
