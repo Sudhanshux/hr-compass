@@ -187,12 +187,14 @@ const SettingsPage: React.FC = () => {
     toast.success('User role updated');
   };
 
-  /* ── User handlers ────────────────────────────────────────────── */
+  // User handlers
   const openAddUser = () => {
     setEditingUser(null);
-    setUserForm(emptyUserForm);
+    setUserForm({ firstName: '', lastName: '', email: '', phone: '', department: '', role: 'employee', status: 'active' });
     setUserDialog(true);
   };
+
+
 
   const openEditUser = (u: ManagedUser) => {
     setEditingUser(u);
@@ -271,38 +273,24 @@ const SettingsPage: React.FC = () => {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {users.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={7} className="text-center py-8 text-muted-foreground text-sm">
-                        No users found.
+                  {users.map(u => (
+                    <TableRow key={u.id}>
+                      <TableCell className="font-medium">{u.firstName} {u.lastName}</TableCell>
+                      <TableCell>{u.email}</TableCell>
+                      <TableCell>{u.phone}</TableCell>
+                      <TableCell>{u.department}</TableCell>
+                      <TableCell><Badge variant="outline" className="capitalize">{u.role}</Badge></TableCell>
+                      <TableCell>
+                        <Badge className={`border-0 text-xs ${u.status === 'active' ? 'bg-success/10 text-success' : 'bg-muted text-muted-foreground'}`}>
+                          {u.status}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-right space-x-1">
+                        <Button variant="ghost" size="icon" onClick={() => openEditUser(u)}><Edit2 size={15} /></Button>
+                        <Button variant="ghost" size="icon" onClick={() => handleDeleteUser(u.id)}><Trash2 size={15} className="text-destructive" /></Button>
                       </TableCell>
                     </TableRow>
-                  ) : (
-                    users.map(u => (
-                      <TableRow key={u.id}>
-                        <TableCell className="font-medium">{u.firstName} {u.lastName}</TableCell>
-                        <TableCell>{u.email}</TableCell>
-                        <TableCell>{u.phone || '—'}</TableCell>
-                        <TableCell>{u.department || '—'}</TableCell>
-                        <TableCell>
-                          <Badge variant="outline" className="capitalize">{u.role}</Badge>
-                        </TableCell>
-                        <TableCell>
-                          <Badge className={`border-0 text-xs ${u.status === 'active' ? 'bg-success/10 text-success' : 'bg-muted text-muted-foreground'}`}>
-                            {u.status}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-right space-x-1">
-                          <Button variant="ghost" size="icon" onClick={() => openEditUser(u)}>
-                            <Edit2 size={15} />
-                          </Button>
-                          <Button variant="ghost" size="icon" onClick={() => handleDeleteUser(u.id)}>
-                            <Trash2 size={15} className="text-destructive" />
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    ))
-                  )}
+                  ))}
                 </TableBody>
               </Table>
             </CardContent>
@@ -327,9 +315,7 @@ const SettingsPage: React.FC = () => {
                       </div>
                     </div>
                     <div className="flex gap-2">
-                      <Button variant="outline" size="sm" onClick={() => setEditingRole(role)}>
-                        Edit Permissions
-                      </Button>
+                      <Button variant="outline" size="sm" onClick={() => setEditingRole(role)}>Edit Permissions</Button>
                       {!['admin', 'manager', 'employee'].includes(role.name) && (
                         <Button variant="ghost" size="icon" onClick={() => handleDeleteRole(role.id)}>
                           <Trash2 size={16} className="text-destructive" />
@@ -393,47 +379,28 @@ const SettingsPage: React.FC = () => {
         </TabsContent>
       </Tabs>
 
-      {/* ── Add / Edit User Dialog ──────────────────────────────────── */}
+      {/* Add/Edit User Dialog */}
       <Dialog open={userDialog} onOpenChange={setUserDialog}>
         <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>{editingUser ? 'Edit User' : 'Create New User'}</DialogTitle>
-          </DialogHeader>
+          <DialogHeader><DialogTitle>{editingUser ? 'Edit User' : 'Create New User'}</DialogTitle></DialogHeader>
           <div className="space-y-4 py-2">
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1">
                 <Label>First Name *</Label>
-                <Input
-                  value={userForm.firstName}
-                  onChange={e => setUserForm(f => ({ ...f, firstName: e.target.value }))}
-                  placeholder="John"
-                />
+                <Input value={userForm.firstName} onChange={e => setUserForm(f => ({ ...f, firstName: e.target.value }))} placeholder="John" />
               </div>
               <div className="space-y-1">
                 <Label>Last Name *</Label>
-                <Input
-                  value={userForm.lastName}
-                  onChange={e => setUserForm(f => ({ ...f, lastName: e.target.value }))}
-                  placeholder="Doe"
-                />
+                <Input value={userForm.lastName} onChange={e => setUserForm(f => ({ ...f, lastName: e.target.value }))} placeholder="Doe" />
               </div>
             </div>
             <div className="space-y-1">
               <Label>Email *</Label>
-              <Input
-                type="email"
-                value={userForm.email}
-                onChange={e => setUserForm(f => ({ ...f, email: e.target.value }))}
-                placeholder="john.doe@hrms.com"
-              />
+              <Input type="email" value={userForm.email} onChange={e => setUserForm(f => ({ ...f, email: e.target.value }))} placeholder="john.doe@hrms.com" />
             </div>
             <div className="space-y-1">
               <Label>Phone</Label>
-              <Input
-                value={userForm.phone}
-                onChange={e => setUserForm(f => ({ ...f, phone: e.target.value }))}
-                placeholder="+91 98765 43210"
-              />
+              <Input value={userForm.phone} onChange={e => setUserForm(f => ({ ...f, phone: e.target.value }))} placeholder="+1 555-0100" />
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1">
@@ -453,19 +420,14 @@ const SettingsPage: React.FC = () => {
                 <Select value={userForm.role} onValueChange={v => setUserForm(f => ({ ...f, role: v }))}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    {roles.map(r => (
-                      <SelectItem key={r.id} value={r.name} className="capitalize">{r.name}</SelectItem>
-                    ))}
+                    {roles.map(r => <SelectItem key={r.id} value={r.name} className="capitalize">{r.name}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
             </div>
             <div className="space-y-1">
               <Label>Status</Label>
-              <Select
-                value={userForm.status}
-                onValueChange={v => setUserForm(f => ({ ...f, status: v as 'active' | 'inactive' }))}
-              >
+              <Select value={userForm.status} onValueChange={v => setUserForm(f => ({ ...f, status: v as 'active' | 'inactive' }))}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="active">Active</SelectItem>
@@ -481,7 +443,7 @@ const SettingsPage: React.FC = () => {
         </DialogContent>
       </Dialog>
 
-      {/* ── Add Role Dialog ─────────────────────────────────────────── */}
+      {/* Add Role Dialog */}
       <Dialog open={roleDialog} onOpenChange={setRoleDialog}>
         <DialogContent>
           <DialogHeader><DialogTitle>Create New Role</DialogTitle></DialogHeader>
