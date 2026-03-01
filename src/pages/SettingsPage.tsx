@@ -15,6 +15,8 @@ import { toast } from 'sonner';
 import { Navigate } from 'react-router-dom';
 import { employeeService } from '@/services/employee.service';
 import { departmentService } from '@/services/department.service';
+import { settingsService } from '@/services/settings.service';
+import { User } from '@/types/models';
 
 /* ── Types ────────────────────────────────────────────────────────── */
 interface RoleDef {
@@ -37,7 +39,8 @@ interface ManagedUser {
   email:      string;
   phone:      string;
   department: string;
-  role:       string;
+  active: boolean;
+  roleName:       string;
   status:     'active' | 'inactive';
 }
 
@@ -81,8 +84,8 @@ const SettingsPage: React.FC = () => {
   const { user } = useAuth();
 
   /* ── Role / mapping state ─────────────────────────────────────── */
-  const [roles,       setRoles]       = useState<RoleDef[]>(defaultRoles);
-  const [mappings,    setMappings]    = useState<UserRoleMapping[]>(defaultMappings);
+  const [roles, setRoles] = useState<RoleDef[]>([]);
+  const [mappings, setMappings] = useState<UserRoleMapping[]>([]);
   const [roleDialog,  setRoleDialog]  = useState(false);
   const [newRoleName, setNewRoleName] = useState('');
   const [newRolePerms,setNewRolePerms]= useState<string[]>([]);
@@ -100,40 +103,40 @@ const SettingsPage: React.FC = () => {
   const [loading,     setLoading]     = useState(true);   // FIX ⑤: used in JSX below
 
   /* ── FIX ①③: useEffect moved INSIDE the component ────────────── */
-  useEffect(() => {
-    const load = async () => {
-      try {
-        const [empRes, deptRes] = await Promise.all([
-          employeeService.getAll().catch(() => ({ content: [] })),
-          departmentService.getAll().catch(() => []),
-        ]);
+ useEffect(() => {
+  const load = async () => {
+    try {
+      setLoading(true);
+      const usersRes = await settingsService.getUsers();
+      const rolesRes = await settingsService.getRoles();
 
-        const emps  = Array.isArray(empRes)  ? empRes  : (empRes?.content ?? []);
-        const depts = Array.isArray(deptRes) ? deptRes : (deptRes         ?? []);
+      const deptRes = await departmentService.getAll();
+        const formattedUsers: ManagedUser[] = usersRes.map(u => ({
+          id: u.id,
+          firstName: u.firstName || '',
+          lastName: u.lastName || '',
+          email: u.email,
+          phone: u.phone || '',
+          department: u.departmentName || '',
+          active: u.active,
+          roleName: u.roleName || 'EMPLOYEE',    
+          status: u.active ? 'active' : 'inactive'
+          }));
 
-        setDepartments(depts);
-
-        // FIX ④: seed users table from real API employees
-        const seeded: ManagedUser[] = emps.slice(0, 20).map((e: any) => ({
-          id:         e.id ?? e._id ?? String(Math.random()),
-          firstName:  e.firstName  ?? '',
-          lastName:   e.lastName   ?? '',
-          email:      e.email      ?? '',
-          phone:      e.phone      ?? e.phoneNumber ?? '',
-          department: e.departmentName ?? e.department ?? '',
-          role:       (e.role ?? 'employee').toLowerCase(),
-          status:     e.status === 'INACTIVE' || e.status === 'inactive' ? 'inactive' : 'active',
-        }));
-        setUsers(seeded);
+        setUsers(formattedUsers);
+        setRoles(rolesRes);
+        setDepartments(deptRes);
 
       } catch (err) {
-        console.error('Settings fetch error:', err);
+        console.error("API FAILED:", err);
       } finally {
         setLoading(false);
       }
     };
-    load();
-  }, []); // FIX ①: runs inside the component — valid hook call
+
+  load();
+}, []);
+ // FIX ①: runs inside the component — valid hook call
 
   /* ── Guard: only admins can access ───────────────────────────── */
   if (user?.role !== 'admin') return <Navigate to="/dashboard" replace />;
@@ -148,20 +151,33 @@ const SettingsPage: React.FC = () => {
   }
 
   /* ── Role handlers ────────────────────────────────────────────── */
-  const handleAddRole = () => {
-    if (!newRoleName.trim()) { toast.error('Role name required'); return; }
-    if (roles.find(r => r.name.toLowerCase() === newRoleName.toLowerCase())) {
-      toast.error('Role already exists'); return;
-    }
-    const role: RoleDef = {
-      id: Date.now().toString(),
-      name: newRoleName.toLowerCase(),
-      permissions: newRolePerms,
+ const handleAddRole = async () => {
+  if (!newRoleName.trim()) {
+    toast.error('Role name required');
+    return;
+  }
+
+  try {
+    const payload = {
+      name: newRoleName.toUpperCase(),
+      description: '',
+      notes:'',
+      permissions: newRolePerms
     };
-    setRoles(prev => [...prev, role]);
-    toast.success(`Role "${newRoleName}" created`);
-    setNewRoleName(''); setNewRolePerms([]); setRoleDialog(false);
-  };
+
+    const created = await settingsService.createRole(payload);
+
+setRoles(prev => [...prev, created]);
+
+    toast.success('Role created');
+    setNewRoleName('');
+    setNewRolePerms([]);
+    setRoleDialog(false);
+
+  } catch (err) {
+    toast.error('Failed to create role');
+  }
+};
 
   const handleDeleteRole = (id: string) => {
     const role = roles.find(r => r.id === id);
@@ -182,10 +198,7 @@ const SettingsPage: React.FC = () => {
     }));
   };
 
-  const handleMapRole = (userId: string, role: string) => {
-    setMappings(prev => prev.map(m => m.userId === userId ? { ...m, role } : m));
-    toast.success('User role updated');
-  };
+ 
 
   // User handlers
   const openAddUser = () => {
@@ -197,18 +210,18 @@ const SettingsPage: React.FC = () => {
 
 
   const openEditUser = (u: ManagedUser) => {
-    setEditingUser(u);
-    setUserForm({
-      firstName:  u.firstName,
-      lastName:   u.lastName,
-      email:      u.email,
-      phone:      u.phone,
-      department: u.department,
-      role:       u.role,
-      status:     u.status,
-    });
-    setUserDialog(true);
-  };
+  setEditingUser(u);
+  setUserForm({
+    firstName: u.firstName,
+    lastName: u.lastName,
+    email: u.email,
+    phone: u.phone,
+    department: u.department,
+    role: u.roleName,
+    status: u.status,
+  });
+  setUserDialog(true);
+};
 
   const handleSaveUser = () => {
     if (!userForm.firstName.trim() || !userForm.lastName.trim() || !userForm.email.trim()) {
@@ -226,7 +239,18 @@ const SettingsPage: React.FC = () => {
       if (users.find(u => u.email.toLowerCase() === userForm.email.toLowerCase())) {
         toast.error('Email already exists'); return;
       }
-      const newUser: ManagedUser = { id: Date.now().toString(), ...userForm };
+            const newUser: ManagedUser = {
+        id: Date.now().toString(),
+        firstName: userForm.firstName,
+        lastName:  userForm.lastName,
+        email:     userForm.email,
+        phone:     userForm.phone,
+        department:userForm.department,
+        roleName:  userForm.role,               // map role -> roleName
+        active:    userForm.status === 'active',// map status -> active boolean
+        status:    userForm.status
+      };
+
       setUsers(prev => [...prev, newUser]);
       toast.success('User created successfully');
     }
@@ -279,7 +303,7 @@ const SettingsPage: React.FC = () => {
                       <TableCell>{u.email}</TableCell>
                       <TableCell>{u.phone}</TableCell>
                       <TableCell>{u.department}</TableCell>
-                      <TableCell><Badge variant="outline" className="capitalize">{u.role}</Badge></TableCell>
+                      <TableCell><Badge variant="outline" className="capitalize">{u.roleName}</Badge></TableCell>
                       <TableCell>
                         <Badge className={`border-0 text-xs ${u.status === 'active' ? 'bg-success/10 text-success' : 'bg-muted text-muted-foreground'}`}>
                           {u.status}
@@ -340,6 +364,7 @@ const SettingsPage: React.FC = () => {
         </TabsContent>
 
         {/* ── User-Role Mapping Tab ───────────────────────────────── */}
+        {/* ── User-Role Mapping Tab ───────────────────────────────── */}
         <TabsContent value="mapping">
           <Card className="shadow-sm">
             <CardContent className="p-0">
@@ -353,19 +378,29 @@ const SettingsPage: React.FC = () => {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {mappings.map(m => (
-                    <TableRow key={m.userId}>
-                      <TableCell className="font-medium">{m.userName}</TableCell>
-                      <TableCell>{m.email}</TableCell>
+                  {users.map(u => (
+                    <TableRow key={u.id}>
+                      <TableCell className="font-medium">{u.firstName} {u.lastName}</TableCell>
+                      <TableCell>{u.email}</TableCell>
                       <TableCell>
-                        <Badge variant="outline" className="capitalize">{m.role}</Badge>
+                        <Badge variant="outline" className="capitalize">{u.roleName}</Badge>
                       </TableCell>
                       <TableCell className="text-right">
-                        <Select value={m.role} onValueChange={v => handleMapRole(m.userId, v)}>
+                        <Select
+                          value={u.roleName}
+                          onValueChange={v => {
+                            setUsers(prev => prev.map(x =>
+                              x.id === u.id ? { ...x, roleName: v } : x
+                            ));
+                            toast.success('Role updated');
+                          }}
+                        >
                           <SelectTrigger className="w-40 ml-auto"><SelectValue /></SelectTrigger>
                           <SelectContent>
                             {roles.map(r => (
-                              <SelectItem key={r.id} value={r.name} className="capitalize">{r.name}</SelectItem>
+                              <SelectItem key={r.id} value={r.name} className="capitalize">
+                                {r.name}
+                              </SelectItem>
                             ))}
                           </SelectContent>
                         </Select>

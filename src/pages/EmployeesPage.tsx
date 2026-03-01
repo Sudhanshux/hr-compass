@@ -16,14 +16,15 @@ import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
 
 const defaultEmployee: Omit<Employee, 'id'> = {
-  firstName: '', lastName: '', email: '', phone: '', departmentName: '', role: '', dateOfJoining: '', status: 'active',
+  firstName: '', lastName: '', email: '', phone: '',
+  departmentName: '',
+  departmentId: '',   // FIX: included in default form so it's always present
+  role: '', dateOfJoining: '', status: 'ACTIVE',
 };
-
-
 
 const EmployeesPage: React.FC = () => {
   const { user } = useAuth();
-const [employees, setEmployees] = useState<Employee[]>([]);
+  const [employees, setEmployees] = useState<Employee[]>([]);
   const [departments, setDepartments] = useState<any[]>([]);
   const [search, setSearch] = useState('');
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -39,86 +40,99 @@ const [employees, setEmployees] = useState<Employee[]>([]);
   const isAdmin = user?.role === 'admin' || user?.role === 'manager';
 
   const filtered = employees
-    .filter(e => `${e.firstName} ${e.lastName} ${e.email} ${e.departmentName}`.toLowerCase().includes(search.toLowerCase()))
+    .filter(e =>
+      `${e.firstName} ${e.lastName} ${e.email} ${e.departmentName}`
+        .toLowerCase()
+        .includes(search.toLowerCase())
+    )
     .sort((a, b) => {
       const av = a[sortField] ?? '';
       const bv = b[sortField] ?? '';
-      return sortDir === 'asc' ? String(av).localeCompare(String(bv)) : String(bv).localeCompare(String(av));
+      return sortDir === 'asc'
+        ? String(av).localeCompare(String(bv))
+        : String(bv).localeCompare(String(av));
     });
 
   const paged = filtered.slice(page * perPage, (page + 1) * perPage);
   const totalPages = Math.ceil(filtered.length / perPage);
 
-  const openAdd = () => { setEditing(null); setForm(defaultEmployee); setDialogOpen(true); };
+  const openAdd  = () => { setEditing(null); setForm(defaultEmployee); setDialogOpen(true); };
   const openEdit = (emp: Employee) => { setEditing(emp); setForm(emp); setDialogOpen(true); };
   const openView = (emp: Employee) => { setViewing(emp); setViewOpen(true); };
 
-
+  // FIX: when the user picks a department from the dropdown, resolve BOTH
+  // departmentName and departmentId from the departments array in one shot.
+  const handleDepartmentChange = (selectedName: string) => {
+    const dept = departments.find(d => d.name === selectedName);
+    setForm(f => ({
+      ...f,
+      departmentName: selectedName,                      // display name for UI
+      departmentId:   dept ? (dept.id ?? dept._id) : '', // FK sent to backend
+    }));
+  };
 
   const handleSave = async () => {
-  if (!form.firstName || !form.lastName || !form.email) {
-    toast.error('Please fill required fields');
-    return;
-  }
-
-  try {
-    if (editing) {
-      const res = await employeeService.update(editing.id, form);
-      setEmployees(prev =>
-        prev.map(e => (e.id === editing.id ? res : e))
-      );
-      toast.success('Employee updated');
-    } else {
-      const res = await employeeService.create(form);
-      setEmployees(prev => [...prev, res]);
-      toast.success('Employee added');
+    if (!form.firstName || !form.lastName || !form.email) {
+      toast.error('Please fill required fields');
+      return;
     }
 
-    setDialogOpen(false);
-  } catch (error) {
-    console.error(error);
-    toast.error('Something went wrong');
-  }
-};
-
- const handleDelete = async (id: string) => {
-  try {
-    await employeeService.delete(id);
-    setEmployees(prev => prev.filter(e => e.id !== id));
-    toast.success('Employee removed');
-  } catch (error) {
-    console.error(error);
-    toast.error('Delete failed');
-  }
-};
-
-useEffect(() => {
-  const fetchData = async () => {
     try {
-      const [empRes, deptRes] = await Promise.all([
-        employeeService.getAll(),
-        departmentService.getAll()
-      ]);
-
-      setEmployees(empRes.content);
-      setDepartments(deptRes);
+      if (editing) {
+        const res = await employeeService.update(editing.id, form);
+        setEmployees(prev => prev.map(e => (e.id === editing.id ? res : e)));
+        toast.success('Employee updated');
+      } else {
+        const res = await employeeService.create(form);
+        setEmployees(prev => [...prev, res]);
+        toast.success('Employee added');
+      }
+      setDialogOpen(false);
     } catch (error) {
       console.error(error);
-      toast.error('Failed to load employees');
+      toast.error('Something went wrong');
     }
   };
 
-  fetchData();
-}, []);
+  const handleDelete = async (id: string) => {
+    try {
+      await employeeService.delete(id);
+      setEmployees(prev => prev.filter(e => e.id !== id));
+      toast.success('Employee removed');
+    } catch (error) {
+      console.error(error);
+      toast.error('Delete failed');
+    }
+  };
 
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const [empRes, deptRes] = await Promise.all([
+          employeeService.getAll(),
+          departmentService.getAll(),
+        ]);
+        setEmployees(empRes.content);
+        setDepartments(deptRes);
+      } catch (error) {
+        console.error(error);
+        toast.error('Failed to load employees');
+      }
+    };
+    fetchData();
+  }, []);
 
   const toggleSort = (field: keyof Employee) => {
-    if (sortField === field) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    if (sortField === field) setSortDir(d => (d === 'asc' ? 'desc' : 'asc'));
     else { setSortField(field); setSortDir('asc'); }
   };
 
   const statusColor = (s: string) =>
-    s === 'active' ? 'bg-success/10 text-success' : s === 'on-leave' ? 'bg-warning/10 text-warning' : 'bg-muted text-muted-foreground';
+    s === 'ACTIVE'
+      ? 'bg-success/10 text-success'
+      : s === 'ONLEAVE'
+      ? 'bg-warning/10 text-warning'
+      : 'bg-muted text-muted-foreground';
 
   return (
     <div className="space-y-6">
@@ -128,7 +142,9 @@ useEffect(() => {
           <p className="text-muted-foreground text-sm">{employees.length} total employees</p>
         </div>
         {isAdmin && (
-          <Button onClick={openAdd}><Plus size={16} className="mr-2" /> Add Employee</Button>
+          <Button onClick={openAdd}>
+            <Plus size={16} className="mr-2" /> Add Employee
+          </Button>
         )}
       </div>
 
@@ -136,16 +152,25 @@ useEffect(() => {
         <CardHeader className="pb-3">
           <div className="relative max-w-sm">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <Input placeholder="Search employees..." value={search} onChange={e => { setSearch(e.target.value); setPage(0); }} className="pl-9" />
+            <Input
+              placeholder="Search employees..."
+              value={search}
+              onChange={e => { setSearch(e.target.value); setPage(0); }}
+              className="pl-9"
+            />
           </div>
         </CardHeader>
         <CardContent className="p-0">
           <Table>
             <TableHeader>
               <TableRow>
-                {['firstName', 'email', 'department', 'role', 'status'].map(f => (
-                  <TableHead key={f} className="cursor-pointer select-none" onClick={() => toggleSort(f as keyof Employee)}>
-                    {f === 'firstName' ? 'Name' : f.charAt(0).toUpperCase() + f.slice(1)}
+                {['firstName', 'email', 'departmentName', 'role', 'status'].map(f => (
+                  <TableHead
+                    key={f}
+                    className="cursor-pointer select-none"
+                    onClick={() => toggleSort(f as keyof Employee)}
+                  >
+                    {f === 'firstName' ? 'Name' : f === 'departmentName' ? 'Department' : f.charAt(0).toUpperCase() + f.slice(1)}
                     {sortField === f && (sortDir === 'asc' ? ' ↑' : ' ↓')}
                   </TableHead>
                 ))}
@@ -153,36 +178,63 @@ useEffect(() => {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {paged.map(emp => (
-                <TableRow key={emp.id}>
-                  <TableCell className="font-medium">{emp.firstName} {emp.lastName}</TableCell>
-                  <TableCell>{emp.email}</TableCell>
-                  <TableCell>{emp.departmentName}</TableCell>
-                  <TableCell>{emp.role}</TableCell>
-                  <TableCell><span className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusColor(emp.status)}`}>{emp.status}</span></TableCell>
-                  <TableCell className="text-right space-x-1">
-                    <Button variant="ghost" size="icon" onClick={() => openView(emp)}><Eye size={16} /></Button>
-                    {isAdmin && <>
-                      <Button variant="ghost" size="icon" onClick={() => openEdit(emp)}><Pencil size={16} /></Button>
-                      <Button variant="ghost" size="icon" onClick={() => handleDelete(emp.id)}><Trash2 size={16} className="text-destructive" /></Button>
-                    </>}
+              {paged.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={6} className="text-center py-8 text-muted-foreground text-sm">
+                    No employees found.
                   </TableCell>
                 </TableRow>
-              ))}
+              ) : (
+                paged.map(emp => (
+                  <TableRow key={emp.id}>
+                    <TableCell className="font-medium">{emp.firstName} {emp.lastName}</TableCell>
+                    <TableCell>{emp.email}</TableCell>
+                    <TableCell>{emp.departmentName}</TableCell>
+                    <TableCell>{emp.role}</TableCell>
+                    <TableCell>
+                      <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusColor(emp.status)}`}>
+                        {emp.status}
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-right space-x-1">
+                      <Button variant="ghost" size="icon" onClick={() => openView(emp)}>
+                        <Eye size={16} />
+                      </Button>
+                      {isAdmin && (
+                        <>
+                          <Button variant="ghost" size="icon" onClick={() => openEdit(emp)}>
+                            <Pencil size={16} />
+                          </Button>
+                          <Button variant="ghost" size="icon" onClick={() => handleDelete(emp.id)}>
+                            <Trash2 size={16} className="text-destructive" />
+                          </Button>
+                        </>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
             </TableBody>
           </Table>
+
           {/* Pagination */}
           <div className="flex items-center justify-between px-4 py-3 border-t">
-            <p className="text-sm text-muted-foreground">Showing {page * perPage + 1}-{Math.min((page + 1) * perPage, filtered.length)} of {filtered.length}</p>
+            <p className="text-sm text-muted-foreground">
+              Showing {filtered.length === 0 ? 0 : page * perPage + 1}–{Math.min((page + 1) * perPage, filtered.length)} of {filtered.length}
+            </p>
             <div className="flex gap-1">
-              <Button variant="outline" size="sm" disabled={page === 0} onClick={() => setPage(p => p - 1)}>Prev</Button>
-              <Button variant="outline" size="sm" disabled={page >= totalPages - 1} onClick={() => setPage(p => p + 1)}>Next</Button>
+              <Button variant="outline" size="sm" disabled={page === 0} onClick={() => setPage(p => p - 1)}>
+                Prev
+              </Button>
+              <Button variant="outline" size="sm" disabled={page >= totalPages - 1} onClick={() => setPage(p => p + 1)}>
+                Next
+              </Button>
             </div>
           </div>
         </CardContent>
       </Card>
 
-      {/* Add/Edit Dialog */}
+      {/* Add / Edit Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
@@ -190,37 +242,60 @@ useEffect(() => {
           </DialogHeader>
           <div className="grid gap-4 py-2">
             <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1"><Label>First Name *</Label><Input value={form.firstName} onChange={e => setForm(f => ({ ...f, firstName: e.target.value }))} /></div>
-              <div className="space-y-1"><Label>Last Name *</Label><Input value={form.lastName} onChange={e => setForm(f => ({ ...f, lastName: e.target.value }))} /></div>
+              <div className="space-y-1">
+                <Label>First Name *</Label>
+                <Input value={form.firstName} onChange={e => setForm(f => ({ ...f, firstName: e.target.value }))} />
+              </div>
+              <div className="space-y-1">
+                <Label>Last Name *</Label>
+                <Input value={form.lastName} onChange={e => setForm(f => ({ ...f, lastName: e.target.value }))} />
+              </div>
             </div>
-            <div className="space-y-1"><Label>Email *</Label><Input type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} /></div>
-            <div className="space-y-1"><Label>Phone</Label><Input value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} /></div>
+            <div className="space-y-1">
+              <Label>Email *</Label>
+              <Input type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} />
+            </div>
+            <div className="space-y-1">
+              <Label>Phone</Label>
+              <Input value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} />
+            </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1">
                 <Label>Department</Label>
-                <Select value={form.departmentName} onValueChange={v => setForm(f => ({ ...f, department: v }))}>
-                  <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
+                {/*
+                  FIX: onValueChange calls handleDepartmentChange which sets BOTH
+                       departmentName (for display) and departmentId (FK for backend).
+                  FIX: value bound to form.departmentName (was bound to wrong key before).
+                */}
+                <Select value={form.departmentName} onValueChange={handleDepartmentChange}>
+                  <SelectTrigger><SelectValue placeholder="Select department" /></SelectTrigger>
                   <SelectContent>
                     {departments.map(d => (
-                      <SelectItem key={d.id} value={d.name}>
+                      <SelectItem key={d.id ?? d._id} value={d.name}>
                         {d.name}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
-              <div className="space-y-1"><Label>Role</Label><Input value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value }))} /></div>
+              <div className="space-y-1">
+                <Label>Role</Label>
+                <Input value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value }))} />
+              </div>
             </div>
             <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1"><Label>Date of Joining</Label><Input type="date" value={form.dateOfJoining} onChange={e => setForm(f => ({ ...f, dateOfJoining: e.target.value }))} /></div>
+              <div className="space-y-1">
+                <Label>Date of Joining</Label>
+                <Input type="date" value={form.dateOfJoining} onChange={e => setForm(f => ({ ...f, dateOfJoining: e.target.value }))} />
+              </div>
               <div className="space-y-1">
                 <Label>Status</Label>
                 <Select value={form.status} onValueChange={v => setForm(f => ({ ...f, status: v as Employee['status'] }))}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="active">Active</SelectItem>
-                    <SelectItem value="inactive">Inactive</SelectItem>
-                    <SelectItem value="on-leave">On Leave</SelectItem>
+                    <SelectItem value="ACTIVE">Active</SelectItem>
+                    <SelectItem value="INACTIVE">Inactive</SelectItem>
+                    <SelectItem value="ONLEAVE">On Leave</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -239,18 +314,18 @@ useEffect(() => {
           <DialogHeader><DialogTitle>Employee Profile</DialogTitle></DialogHeader>
           {viewing && (
             <div className="space-y-3 py-2">
-              {[
-                ['Name', `${viewing.firstName} ${viewing.lastName}`],
-                ['Email', viewing.email],
-                ['Phone', viewing.phone],
+              {([
+                ['Name',       `${viewing.firstName} ${viewing.lastName}`],
+                ['Email',      viewing.email],
+                ['Phone',      viewing.phone],
                 ['Department', viewing.departmentName],
-                ['Role', viewing.role],
-                ['Joined', viewing.dateOfJoining],
-                ['Status', viewing.status],
-              ].map(([label, val]) => (
+                ['Role',       viewing.role],
+                ['Joined',     viewing.dateOfJoining],
+                ['Status',     viewing.status],
+              ] as [string, string][]).map(([label, val]) => (
                 <div key={label} className="flex justify-between text-sm">
                   <span className="text-muted-foreground">{label}</span>
-                  <span className="font-medium">{val}</span>
+                  <span className="font-medium">{val || '—'}</span>
                 </div>
               ))}
             </div>

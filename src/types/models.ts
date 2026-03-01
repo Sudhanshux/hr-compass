@@ -6,7 +6,13 @@ export interface User {
   email: string;
   name: string;
   role: UserRole;
+  roleName: string;
   avatar?: string;
+  firstName: string;
+  lastName: string;
+  phone: string;
+  departmentName: string;
+  active : boolean;
 }
 
 export interface Employee {
@@ -18,9 +24,10 @@ export interface Employee {
   departmentName: string;
   role: string;
   dateOfJoining: string;
-  status: 'active' | 'inactive' | 'on-leave';
+  status: 'ACTIVE' | 'INACTIVE' | 'ONLEAVE';
   avatar?: string;
   salary?: number;
+  departmentId: string;
 }
 
 export interface Department {
@@ -56,3 +63,18 @@ export interface PayslipData {
   providentFund: number;
   netSalary: number;
 }
+
+export interface Role {
+  id: string;
+  name: string;
+  description: string;
+  permissions: string[];
+  permissionCount: number;
+  active: boolean;
+  lastModifiedBy: string;
+  createdAt: string;
+  updatedAt: string;
+  assignedUserCount: number;
+}
+
+
