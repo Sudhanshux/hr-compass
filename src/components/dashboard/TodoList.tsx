@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -11,16 +11,29 @@ interface Todo {
   done: boolean;
 }
 
-const initialTodos: Todo[] = [
-  { id: '1', text: 'Review team leave requests', done: false },
-  { id: '2', text: 'Submit monthly report', done: false },
-  { id: '3', text: 'Complete compliance training', done: true },
-  { id: '4', text: 'Update project documentation', done: false },
-];
+const STORAGE_KEY = 'hrms_todos';
+
+function loadTodos(): Todo[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveTodos(todos: Todo[]) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(todos));
+}
 
 const TodoList: React.FC = () => {
-  const [todos, setTodos] = useState<Todo[]>(initialTodos);
+  const [todos,   setTodos]   = useState<Todo[]>(loadTodos);
   const [newText, setNewText] = useState('');
+
+  // Persist on every change
+  useEffect(() => {
+    saveTodos(todos);
+  }, [todos]);
 
   const add = () => {
     if (!newText.trim()) return;
@@ -58,18 +71,22 @@ const TodoList: React.FC = () => {
           <Button size="sm" onClick={add} className="h-9 px-3"><Plus size={14} /></Button>
         </div>
         <div className="space-y-1 max-h-[250px] overflow-y-auto">
-          {todos.map(t => (
-            <div key={t.id} className="flex items-center gap-3 rounded-lg px-2 py-2 hover:bg-muted/50 group">
-              <Checkbox checked={t.done} onCheckedChange={() => toggle(t.id)} />
-              <span className={`flex-1 text-sm ${t.done ? 'line-through text-muted-foreground' : ''}`}>{t.text}</span>
-              <button
-                onClick={() => remove(t.id)}
-                className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-opacity"
-              >
-                <Trash2 size={14} />
-              </button>
-            </div>
-          ))}
+          {todos.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-4">No tasks yet. Add one above.</p>
+          ) : (
+            todos.map(t => (
+              <div key={t.id} className="flex items-center gap-3 rounded-lg px-2 py-2 hover:bg-muted/50 group">
+                <Checkbox checked={t.done} onCheckedChange={() => toggle(t.id)} />
+                <span className={`flex-1 text-sm ${t.done ? 'line-through text-muted-foreground' : ''}`}>{t.text}</span>
+                <button
+                  onClick={() => remove(t.id)}
+                  className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-opacity"
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            ))
+          )}
         </div>
       </CardContent>
     </Card>

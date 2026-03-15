@@ -25,6 +25,12 @@ async function request<T>(endpoint: string, options: RequestOptions = {}): Promi
   const response = await fetch(url, { headers, ...rest });
 
   if (!response.ok) {
+    if (response.status === 401) {
+      localStorage.removeItem('hrms_token');
+      localStorage.removeItem('hrms_user');
+      window.location.replace('/login');
+      throw new Error('Session expired. Please sign in again.');
+    }
     const error = await response.json().catch(() => ({ message: response.statusText }));
     throw new Error(error.message || `API Error: ${response.status}`);
   }
@@ -49,4 +55,28 @@ export const apiClient = {
 
   delete: <T>(endpoint: string, options?: RequestOptions) =>
     request<T>(endpoint, { method: 'DELETE', ...options }),
+
+  /** Multipart/form-data POST — do NOT set Content-Type (browser adds boundary automatically) */
+  postForm: async <T>(endpoint: string, data: FormData): Promise<T> => {
+    const token = localStorage.getItem('hrms_token');
+    const url   = `${API_BASE_URL}${endpoint}`;
+    const res   = await fetch(url, {
+      method: 'POST',
+      body: data,
+      headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    });
+    if (!res.ok) {
+      if (res.status === 401) {
+        localStorage.removeItem('hrms_token');
+        localStorage.removeItem('hrms_user');
+        window.location.replace('/login');
+        throw new Error('Session expired. Please sign in again.');
+      }
+      const err = await res.json().catch(() => ({ message: res.statusText }));
+      throw new Error(err.message || `API Error: ${res.status}`);
+    }
+    if (res.status === 204) return undefined as T;
+    const json = await res.json();
+    return (json.data ?? json) as T;
+  },
 };

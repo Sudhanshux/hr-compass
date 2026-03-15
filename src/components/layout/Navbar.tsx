@@ -13,7 +13,6 @@ import {
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { UserRole } from '@/types/models';
 import { useNotifications } from '@/contexts/NotificationContext';
 
 const routeLabels: Record<string, string> = {
@@ -29,7 +28,7 @@ const routeLabels: Record<string, string> = {
 };
 
 const Navbar: React.FC = () => {
-  const { user, logout, switchRole } = useAuth();
+  const { user, logout } = useAuth();
   const { isDark, toggle } = useTheme();
   const { notifications, unreadCount, markRead, markAllRead, clearAll } = useNotifications();
   const location = useLocation();
@@ -135,13 +134,6 @@ const Navbar: React.FC = () => {
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={() => navigate('/profile')}>My Profile</DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuLabel className="text-xs text-muted-foreground">Switch Role</DropdownMenuLabel>
-            {(['admin', 'manager', 'employee'] as UserRole[]).map(role => (
-              <DropdownMenuItem key={role} onClick={() => switchRole(role)} className="capitalize">
-                {role} {user?.role === role && '✓'}
-              </DropdownMenuItem>
-            ))}
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={logout} className="text-destructive">
               Logout

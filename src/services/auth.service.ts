@@ -1,5 +1,5 @@
 import { apiClient } from './api-client';
-import { User } from '@/types/models';
+import { Employee, User } from '@/types/models';
 
 export interface LoginRequest {
   email: string;
@@ -13,6 +13,8 @@ export interface LoginResponse {
   employeeId: string;
   email: string;
   roles: string[];
+  organizationId?: string;
+  organizationName?: string;
 }
 
 export const authService = {
@@ -23,5 +25,5 @@ export const authService = {
     apiClient.post<void>('/auth/logout'),
 
   me: () =>
-    apiClient.get<User>('/auth/me'),
+    apiClient.get<Employee>('/auth/me'),
 };

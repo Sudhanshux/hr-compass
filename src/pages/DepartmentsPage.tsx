@@ -1,79 +1,97 @@
-import React, { useState } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import React, { useState, useEffect } from 'react';
+import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import { Plus, Pencil, Trash2, Building2 } from 'lucide-react';
+import { Plus, Pencil, Trash2, Building2, Users } from 'lucide-react';
 import { Department } from '@/types/models';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
-import { useEffect } from 'react';
+import { useNotifications } from '@/contexts/NotificationContext';
 import { departmentService } from '@/services/department.service';
+import { employeeService } from '@/services/employee.service';
 
 const DepartmentsPage: React.FC = () => {
   const { user } = useAuth();
+  const { addNotification } = useNotifications();
   const isAdmin = user?.role === 'admin' || user?.role === 'manager';
+
   const [departments, setDepartments] = useState<Department[]>([]);
+  const [allEmployees, setAllEmployees] = useState<any[]>([]);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Department | null>(null);
-  const [form, setForm] = useState({ name: '', head: '', description: '' });
-
-  const openAdd = () => { setEditing(null); setForm({ name: '', head: '', description: '' }); setDialogOpen(true); };
-  const openEdit = (d: Department) => { setEditing(d); setForm({ name: d.name, head: d.head, description: d.description }); setDialogOpen(true); };
-
+  const [form, setForm] = useState({ name: '', managerId: '', description: '' });
 
   useEffect(() => {
-  const fetchDepartments = async () => {
+    const load = async () => {
+      try {
+        const [depts, emps] = await Promise.all([
+          departmentService.getAll(),
+          employeeService.getAll({ size: 200 }),
+        ]);
+        setDepartments(depts);
+        setAllEmployees(emps.content ?? []);
+      } catch (err) {
+        toast.error('Failed to load departments');
+      }
+    };
+    load();
+  }, []);
+
+  // Show all org employees for head selection — dept-only filter is unreliable
+  // for existing data where users may not have departmentId populated
+  const headOptions = allEmployees;
+
+  const openAdd = () => {
+    setEditing(null);
+    setForm({ name: '', managerId: '', description: '' });
+    setDialogOpen(true);
+  };
+
+  const openEdit = (d: Department) => {
+    setEditing(d);
+    setForm({ name: d.name, managerId: d.managerId ?? '', description: d.description ?? '' });
+    setDialogOpen(true);
+  };
+
+  const handleSave = async () => {
+    if (!form.name) { toast.error('Name is required'); return; }
     try {
-      const response = await departmentService.getAll();
-      setDepartments(response); // because backend wraps in { data: [...] }
-    } catch (error) {
-      console.error(error);
-      toast.error('Failed to load departments');
+      const payload = {
+        name:        form.name,
+        description: form.description,
+        managerId:   form.managerId || undefined,
+      };
+      if (editing) {
+        const res = await departmentService.update(editing.id, payload as any);
+        setDepartments(prev => prev.map(d => d.id === editing.id ? res : d));
+        toast.success(`${form.name} department updated`);
+        addNotification({ title: 'Department Updated', message: `${form.name} department details have been updated.`, type: 'info' });
+      } else {
+        const res = await departmentService.create(payload as any);
+        setDepartments(prev => [...prev, res]);
+        toast.success(`${form.name} department added`);
+        addNotification({ title: 'Department Created', message: `${form.name} department has been created.`, type: 'success' });
+      }
+      setDialogOpen(false);
+    } catch {
+      toast.error('Operation failed');
     }
   };
 
-  fetchDepartments();
-}, []);
-
- const handleSave = async () => {
-  if (!form.name) {
-    toast.error('Name is required');
-    return;
-  }
-
-  try {
-    if (editing) {
-      const response = await departmentService.update(editing.id, form);
-      setDepartments(prev =>
-        prev.map(d => d.id === editing.id ? response : d)
-      );
-      toast.success('Department updated');
-    } else {
-      const response = await departmentService.create(form);
-      setDepartments(prev => [...prev, response]);
-      toast.success('Department added');
-    }
-
-    setDialogOpen(false);
-  } catch (error) {
-    console.error(error);
-    toast.error('Operation failed');
-  }
-};
-
   const handleDelete = async (id: string) => {
-  try {
-    await departmentService.delete(id);
-    setDepartments(prev => prev.filter(d => d.id !== id));
-    toast.success('Department removed');
-  } catch (error) {
-    console.error(error);
-    toast.error('Delete failed');
-  }
-};
-
+    const dept = departments.find(d => d.id === id);
+    try {
+      await departmentService.delete(id);
+      setDepartments(prev => prev.filter(d => d.id !== id));
+      toast.success(`${dept?.name} department removed`);
+      addNotification({ title: 'Department Removed', message: `${dept?.name} department has been removed.`, type: 'warning' });
+    } catch {
+      toast.error('Delete failed');
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -82,7 +100,9 @@ const DepartmentsPage: React.FC = () => {
           <h1 className="text-2xl font-bold">Departments</h1>
           <p className="text-muted-foreground text-sm">{departments.length} departments</p>
         </div>
-        {isAdmin && <Button onClick={openAdd}><Plus size={16} className="mr-2" /> Add Department</Button>}
+        {isAdmin && (
+          <Button onClick={openAdd}><Plus size={16} className="mr-2" /> Add Department</Button>
+        )}
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -96,18 +116,29 @@ const DepartmentsPage: React.FC = () => {
                   </div>
                   <div>
                     <h3 className="font-semibold">{dept.name}</h3>
-                    <p className="text-xs text-muted-foreground">Head: {dept.head}</p>
+                    <p className="text-xs text-muted-foreground">
+                      Head: {dept.managerName ?? dept.head ?? '—'}
+                    </p>
                   </div>
                 </div>
                 {isAdmin && (
                   <div className="flex gap-1">
-                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEdit(dept)}><Pencil size={14} /></Button>
-                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleDelete(dept.id)}><Trash2 size={14} className="text-destructive" /></Button>
+                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEdit(dept)}>
+                      <Pencil size={14} />
+                    </Button>
+                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleDelete(dept.id)}>
+                      <Trash2 size={14} className="text-destructive" />
+                    </Button>
                   </div>
                 )}
               </div>
-              <p className="text-sm text-muted-foreground mt-3">{dept.description}</p>
-              <div className="mt-3 text-sm font-medium">{dept.employeeCount} employees</div>
+              {dept.description && (
+                <p className="text-sm text-muted-foreground mt-3">{dept.description}</p>
+              )}
+              <div className="mt-3 flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
+                <Users size={14} />
+                {dept.employeeCount ?? 0} employees
+              </div>
             </CardContent>
           </Card>
         ))}
@@ -115,11 +146,38 @@ const DepartmentsPage: React.FC = () => {
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent>
-          <DialogHeader><DialogTitle>{editing ? 'Edit' : 'Add'} Department</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>{editing ? 'Edit' : 'Add'} Department</DialogTitle>
+          </DialogHeader>
           <div className="space-y-4 py-2">
-            <div className="space-y-1"><Label>Name *</Label><Input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></div>
-            <div className="space-y-1"><Label>Head</Label><Input value={form.head} onChange={e => setForm(f => ({ ...f, head: e.target.value }))} /></div>
-            <div className="space-y-1"><Label>Description</Label><Input value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} /></div>
+            <div className="space-y-1">
+              <Label>Name *</Label>
+              <Input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
+            </div>
+            <div className="space-y-1">
+              <Label>Department Head</Label>
+              <Select
+                value={form.managerId}
+                onValueChange={v => setForm(f => ({ ...f, managerId: v }))}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder={headOptions.length === 0 ? 'No employees available' : 'Select head'} />
+                </SelectTrigger>
+                <SelectContent>
+                  {headOptions.map(e => (
+                    <SelectItem key={e.id} value={e.id}>
+                      {e.firstName} {e.lastName}
+                      {e.departmentName ? ` — ${e.departmentName}` : ''}
+                      {e.role ? ` (${e.role.replace('ROLE_', '')})` : ''}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label>Description</Label>
+              <Input value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} />
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>

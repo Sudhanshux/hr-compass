@@ -12,6 +12,7 @@ import { departmentService } from '@/services/department.service';
 import { leaveService } from '@/services/leave.service';
 import { attendanceService } from '@/services/attendance.service';
 import { payrollService } from '@/services/payroll.service';
+import { onboardingService } from '@/services/onboarding.service';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line } from 'recharts';
 import Announcements from '@/components/dashboard/Announcements';
 import TodoList from '@/components/dashboard/TodoList';
@@ -31,7 +32,6 @@ const PageLoader: React.FC = () => (
   </div>
 );
 
-// FIX ②: interface at module level — NOT inside a component body
 interface QuickStat {
   title:  string;
   value:  string | number;
@@ -40,8 +40,23 @@ interface QuickStat {
   accent: string;
 }
 
+/** Returns the last 5 weekdays as { iso: 'YYYY-MM-DD', label: 'Mon' } */
+function getLastFiveWeekdays(): { iso: string; label: string }[] {
+  const result: { iso: string; label: string }[] = [];
+  const labels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const d = new Date();
+  while (result.length < 5) {
+    if (d.getDay() !== 0 && d.getDay() !== 6) {
+      const iso = d.toISOString().split('T')[0];
+      result.unshift({ iso, label: labels[d.getDay()] });
+    }
+    d.setDate(d.getDate() - 1);
+  }
+  return result;
+}
+
 /* ══════════════════════════════════════════════════════════════════
-   ADMIN DASHBOARD — unchanged, already working
+   ADMIN DASHBOARD
    ══════════════════════════════════════════════════════════════════ */
 const AdminDashboard: React.FC<{ userName: string }> = ({ userName }) => {
   const [employees,      setEmployees]      = useState<any[]>([]);
@@ -54,46 +69,55 @@ const AdminDashboard: React.FC<{ userName: string }> = ({ userName }) => {
   useEffect(() => {
     const load = async () => {
       try {
-        const [empRes, deptRes, leaveRes] = await Promise.all([
-          employeeService.getAll().catch(() => ({ content: [] })),
+        const [empRes, deptRes, leaveRes, onboardingRes] = await Promise.all([
+          employeeService.getAll({ size: 500 }).catch(() => ({ content: [] })),
           departmentService.getAll().catch(() => []),
           leaveService.getAll().catch(() => ({ content: [] })),
+          onboardingService.getAll().catch(() => []),
         ]);
 
-        const emps   = Array.isArray(empRes)   ? empRes   : (empRes?.content  ?? []);
-        const depts  = Array.isArray(deptRes)  ? deptRes  : (deptRes          ?? []);
-        const leaves = Array.isArray(leaveRes) ? leaveRes : (leaveRes?.content ?? []);
+        const emps       = Array.isArray(empRes)       ? empRes       : (empRes?.content  ?? []);
+        const depts      = Array.isArray(deptRes)      ? deptRes      : (deptRes          ?? []);
+        const leaves     = Array.isArray(leaveRes)     ? leaveRes     : (leaveRes?.content ?? []);
+        const onboarding = Array.isArray(onboardingRes) ? onboardingRes : [];
 
         setEmployees(emps);
         setDepartments(depts);
         setLeaveRequests(leaves);
 
+        // Monthly hires — from completed onboarding records using dateOfJoining
         const hireMap: Record<string, number> = {};
         const now = new Date();
         for (let i = 5; i >= 0; i--) {
           const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
           hireMap[d.toLocaleString('default', { month: 'short' })] = 0;
         }
-        emps.forEach((e: any) => {
-          if (e.joiningDate || e.joinDate || e.createdAt) {
-            const d   = new Date(e.joiningDate ?? e.joinDate ?? e.createdAt);
-            const key = d.toLocaleString('default', { month: 'short' });
-            if (key in hireMap) hireMap[key]++;
-          }
-        });
+        onboarding
+          .filter((o: any) => o.completionPercent === 100 || o.status === 'completed')
+          .forEach((o: any) => {
+            const raw = o.dateOfJoining ?? o.createdAt;
+            if (raw) {
+              const key = new Date(raw).toLocaleString('default', { month: 'short' });
+              if (key in hireMap) hireMap[key]++;
+            }
+          });
         setMonthlyHires(Object.entries(hireMap).map(([month, hires]) => ({ month, hires })));
 
+        // Weekly attendance — count employees who actually punched in each weekday
         try {
-          const attRes = await attendanceService.getWeeklySummary().catch(() => null);
-          if (attRes && Array.isArray(attRes)) {
-            setAttendanceWeek(attRes);
-          } else {
-            const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
-            setAttendanceWeek(days.map(day => ({
-              day,
-              present: emps.length > 0 ? Math.round(emps.length * 0.9) : 0,
-            })));
-          }
+          const weekdays = getLastFiveWeekdays();
+          const attResults = await Promise.all(
+            weekdays.map(d => attendanceService.getByDate(d.iso).catch(() => ({ content: [] })))
+          );
+          const weeklyData = weekdays.map((d, i) => {
+            const res: any   = attResults[i];
+            const records: any[] = res?.content ?? (Array.isArray(res) ? res : []);
+            // Count employees who punched in (punchInTime present) that day
+            const punchedIn = records.filter((r: any) => r.punchInTime != null).length;
+            const rate = emps.length > 0 ? Math.round((punchedIn / emps.length) * 100) : 0;
+            return { day: d.label, present: rate };
+          });
+          setAttendanceWeek(weeklyData);
         } catch {
           setAttendanceWeek([]);
         }
@@ -108,17 +132,20 @@ const AdminDashboard: React.FC<{ userName: string }> = ({ userName }) => {
 
   if (loading) return <PageLoader />;
 
+  const activeCount = employees.filter((e: any) =>
+    e.status === 'ACTIVE' || e.status === 'active'
+  ).length;
+
   const stats = [
-    { title: 'Total Employees', value: employees.length,                                                                            icon: Users,        change: '+12%', up: true  },
-    { title: 'Active',          value: employees.filter((e: any) => e.status === 'ACTIVE' || e.status === 'active').length,         icon: UserCheck,    change: '+5%',  up: true  },
-    { title: 'Departments',     value: departments.length,                                                                           icon: Building2,    change: '0%',   up: true  },
-    { title: 'Pending Leaves',  value: leaveRequests.filter((l: any) => l.status === 'PENDING' || l.status === 'pending').length,   icon: CalendarDays, change: '-8%',  up: false },
+    { title: 'Total Employees', value: employees.length,   icon: Users,        change: '+12%', up: true  },
+    { title: 'Active',          value: activeCount,         icon: UserCheck,    change: '+5%',  up: true  },
+    { title: 'Departments',     value: departments.length,  icon: Building2,    change: '0%',   up: true  },
+    { title: 'Pending Leaves',  value: leaveRequests.length, icon: CalendarDays, change: '-8%', up: false },
   ];
 
-  const deptData = departments.map((d: any) => ({
-    name:  d.name,
-    value: d.employeeCount ?? d.headCount ?? 0,
-  }));
+  const deptData = departments
+    .map((d: any) => ({ name: d.name, value: d.employeeCount ?? d.headCount ?? 0 }))
+    .filter(d => d.value > 0);
 
   return (
     <div className="space-y-6">
@@ -198,8 +225,8 @@ const AdminDashboard: React.FC<{ userName: string }> = ({ userName }) => {
                 <LineChart data={attendanceWeek}>
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis dataKey="day" />
-                  <YAxis domain={[0, 100]} />
-                  <Tooltip />
+                  <YAxis domain={[0, 100]} unit="%" />
+                  <Tooltip formatter={(v: any) => `${v}%`} />
                   <Line type="monotone" dataKey="present" stroke="hsl(187,100%,38%)" strokeWidth={2} dot={{ r: 4 }} />
                 </LineChart>
               </ResponsiveContainer>
@@ -224,7 +251,6 @@ const EmployeeDashboard: React.FC<{ userName: string; employeeId: string }> = ({
   const [latestPayslip, setLatestPayslip] = useState<any | null>(null);
   const [loading,       setLoading]       = useState(true);
 
-  // FIX ①: useEffect uncommented — this was why the page showed only a spinner forever
   useEffect(() => {
     if (!employeeId) {
       setLoading(false);
@@ -233,22 +259,21 @@ const EmployeeDashboard: React.FC<{ userName: string; employeeId: string }> = ({
 
     const load = async () => {
       try {
-        // const [todayRes, balanceRes, leavesRes, payrollRes] = await Promise.all([
-        const [todayRes] = await Promise.all([
+        const [todayRes, balanceRes, leavesRes, payslips] = await Promise.all([
           attendanceService.getToday(employeeId).catch(() => null),
-          // attendanceService.getBalance(employeeId).catch(() => null),
-          // leaveService.getEmployeeLeaves(employeeId, 0, 5).catch(() => ({ content: [] })),
-          // payrollService.getLatest(employeeId).catch(() => null),
+          leaveService.getBalance(employeeId).catch(() => null),
+          leaveService.getByEmployee(employeeId).catch(() => ({ content: [] })),
+          payrollService.getMine().catch(() => []),
         ]);
 
         setTodayRecord(todayRes);
-        // setLeaveBalance(balanceRes);
+        setLeaveBalance(balanceRes);
 
-        // const raw    = leavesRes as any;
-        // const leaves = Array.isArray(raw) ? raw : (raw?.content ?? []);
-        // setMyLeaves(leaves);
+        const raw = leavesRes as any;
+        setMyLeaves(Array.isArray(raw) ? raw : (raw?.content ?? []));
 
-        // setLatestPayslip(payrollRes);
+        // Latest payslip is first (sorted by month desc from backend)
+        setLatestPayslip(Array.isArray(payslips) && payslips.length > 0 ? payslips[0] : null);
       } catch (err) {
         console.error('Employee dashboard fetch error:', err);
       } finally {
@@ -261,7 +286,6 @@ const EmployeeDashboard: React.FC<{ userName: string; employeeId: string }> = ({
 
   if (loading) return <PageLoader />;
 
-  /* ── Derive display values ── */
   const attendanceStatus = todayRecord?.punchInTime
     ? todayRecord.punchOutTime ? 'Complete' : 'Present'
     : 'Not Punched In';
@@ -292,17 +316,12 @@ const EmployeeDashboard: React.FC<{ userName: string; employeeId: string }> = ({
         }))
       : [];
 
-  // QuickStat interface is now at module level (Fix ②)
   const quickStats: QuickStat[] = [
-    { title: 'Today',          value: attendanceStatus,            icon: Clock,        desc: 'Attendance status', accent: 'bg-success/10 text-success'   },
-    { title: 'Pending Leaves', value: pendingLeaveCount,           icon: CalendarDays, desc: 'Awaiting approval', accent: 'bg-warning/10 text-warning'   },
-    { title: 'Leave Balance',  value: `${totalLeaveRemaining} days`, icon: CalendarDays, desc: 'Days remaining',  accent: 'bg-info/10 text-info'         },
-    { title: 'Net Salary',     value: netSalary,                   icon: DollarSign,   desc: salaryMonth,         accent: 'bg-primary/10 text-primary'   },
+    { title: 'Today',          value: attendanceStatus,              icon: Clock,        desc: 'Attendance status', accent: 'bg-success/10 text-success'   },
+    { title: 'Pending Leaves', value: pendingLeaveCount,             icon: CalendarDays, desc: 'Awaiting approval', accent: 'bg-warning/10 text-warning'   },
+    { title: 'Leave Balance',  value: `${totalLeaveRemaining} days`, icon: CalendarDays, desc: 'Days remaining',    accent: 'bg-info/10 text-info'         },
+    { title: 'Net Salary',     value: netSalary,                     icon: DollarSign,   desc: salaryMonth,         accent: 'bg-primary/10 text-primary'   },
   ];
-/* ── Employee-specific Dashboard ── */
-
-    // const myPayslip = mockPayslips[0];
-  // const myLeaves = leaveBalance.filter(l => l.employeeId === '3' || l.status === 'pending').slice(0, 3);
 
   return (
     <div className="space-y-6">
@@ -317,7 +336,6 @@ const EmployeeDashboard: React.FC<{ userName: string; employeeId: string }> = ({
             <CardContent className="flex items-center justify-between p-5">
               <div>
                 <p className="text-sm text-muted-foreground">{s.title}</p>
-                {/* FIX ③: uncommented — was preventing values from rendering */}
                 <p className="text-2xl font-bold mt-1">{s.value}</p>
                 <p className="text-xs text-muted-foreground">{s.desc}</p>
               </div>
@@ -357,6 +375,7 @@ const EmployeeDashboard: React.FC<{ userName: string; employeeId: string }> = ({
         </CardContent>
       </Card>
 
+      {/* Recent leave requests */}
       <Card className="shadow-sm">
         <CardHeader><CardTitle className="text-base">My Recent Leave Requests</CardTitle></CardHeader>
         <CardContent>
@@ -403,8 +422,8 @@ const DashboardPage: React.FC = () => {
 
   const role       = (user?.role ?? '').toLowerCase();
   const isEmployee = role === 'employee';
-  const userName   = user?.name ?? user?.name ?? 'User';
-const employeeId = user?.employeeId?.toString() ?? '';
+  const userName   = user?.name ?? 'User';
+  const employeeId = user?.employeeId?.toString() ?? '';
 
   if (isEmployee) {
     return <EmployeeDashboard userName={userName} employeeId={employeeId} />;

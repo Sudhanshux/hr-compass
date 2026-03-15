@@ -14,45 +14,31 @@ interface SpringPage<T> {
   empty:            boolean;
 }
 
-export interface PageResponse<T> {
-  timestamp: string;
-  success: boolean;
-  status: number;
-  message: string;
-  data: SpringPage<T>;
-}
-
-export interface ApiResponse<T> {
-  timestamp: string;
-  success: boolean;
-  status: number;
-  message: string;
-  data: T;
-}
-
-
-
-/* ───────── ROLES ───────── */
 
 export const settingsService = {
 
-  // Roles
-     getRoles: () =>
-        apiClient.get<Role[]>('/roles'),
+  /* ───────── ROLES ───────── */
 
-  createRole: async (payload: any) => {
-    const res = await apiClient.post<ApiResponse<Role>>('/roles', payload);
-    return res.data;
+  getRoles: (): Promise<Role[]> =>
+    apiClient.get<Role[]>('/roles'),
+
+  // Backend returns 201 with Role object inside `data`; apiClient unwraps it
+  createRole: async (payload: {
+    name:        string;
+    description: string;
+    permissions: string[];
+  }): Promise<Role> => {
+    return apiClient.post<Role>('/roles', payload);
   },
 
-//   updateRole: async (id: string, payload: any) => {
-//     const res = await apiClient.put(`/roles/${id}`, payload);
-//     return res.data;
-//   },
+  // Permissions must be UPPERCASE enum values (e.g. VIEW_DASHBOARD)
+  updateRole: async (id: string, payload: { permissions: string[] }): Promise<Role> => {
+    return apiClient.put<Role>(`/roles/${id}`, payload);
+  },
 
-//   deleteRole: async (id: string) => {
-//     return api.delete(`/roles/${id}`);
-//   },
+  deleteRole: async (id: string): Promise<void> => {
+    await apiClient.delete(`/roles/${id}`);
+  },
 
   /* ───────── USERS ───────── */
 
@@ -61,23 +47,34 @@ export const settingsService = {
     return res.content ?? [];
   },
 
+  createUser: async (payload: {
+    email:           string;
+    password:        string;
+    firstName:       string;
+    lastName:        string;
+    phone?:          string;
+    departmentName?: string;
+    departmentId?:   string;
+    roles?:          string[];
+  }): Promise<void> => {
+    await apiClient.post('/auth/register', payload);
+  },
 
-//   createUser: async (payload: any) => {
-//     const res = await apiClient.post('/users', payload);
-//     return res.data;
-//   },
+  // No general update endpoint exists for users; status must be toggled via these two endpoints
+  activateUser: async (id: string): Promise<void> => {
+    await apiClient.put(`/users/${id}/activate`);
+  },
 
-//   updateUser: async (id: string, payload: any) => {
-//     const res = await apiClient.put(`/users/${id}`, payload);
-//     return res.data;
-//   },
+  deactivateUser: async (id: string): Promise<void> => {
+    await apiClient.put(`/users/${id}/deactivate`);
+  },
 
-//   deleteUser: async (id: string) => {
-//     return apiClient.delete(`/users/${id}`);
-//   },
+  deleteUser: async (id: string): Promise<void> => {
+    await apiClient.delete(`/users/${id}`);
+  },
 
-//   assignRole: async (userId: string, roleName: string) => {
-//     return apiClient.put(`/users/${userId}/role`, { role: roleName });
-//   }
-
+  // Requires roleId (not role name); endpoint: PUT /users/{userId}/role
+  assignRole: async (userId: string, roleId: string): Promise<void> => {
+    await apiClient.put(`/users/${userId}/role`, { roleId });
+  },
 };

@@ -7,13 +7,14 @@ import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
-import { Plus, Search, Pencil, Trash2, Eye } from 'lucide-react';
+import { Search, Pencil, Trash2, Eye } from 'lucide-react';
 import { Employee } from '@/types/models';
 import { useEffect } from 'react';
 import { employeeService } from '@/services/employee.service';
 import { departmentService } from '@/services/department.service';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
+import { useNotifications } from '@/contexts/NotificationContext';
 
 const defaultEmployee: Omit<Employee, 'id'> = {
   firstName: '', lastName: '', email: '', phone: '',
@@ -24,6 +25,7 @@ const defaultEmployee: Omit<Employee, 'id'> = {
 
 const EmployeesPage: React.FC = () => {
   const { user } = useAuth();
+  const { addNotification } = useNotifications();
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [departments, setDepartments] = useState<any[]>([]);
   const [search, setSearch] = useState('');
@@ -56,7 +58,6 @@ const EmployeesPage: React.FC = () => {
   const paged = filtered.slice(page * perPage, (page + 1) * perPage);
   const totalPages = Math.ceil(filtered.length / perPage);
 
-  const openAdd  = () => { setEditing(null); setForm(defaultEmployee); setDialogOpen(true); };
   const openEdit = (emp: Employee) => { setEditing(emp); setForm(emp); setDialogOpen(true); };
   const openView = (emp: Employee) => { setViewing(emp); setViewOpen(true); };
 
@@ -81,11 +82,13 @@ const EmployeesPage: React.FC = () => {
       if (editing) {
         const res = await employeeService.update(editing.id, form);
         setEmployees(prev => prev.map(e => (e.id === editing.id ? res : e)));
-        toast.success('Employee updated');
+        toast.success(`${form.firstName} ${form.lastName} profile updated`);
+        addNotification({ title: 'Employee Updated', message: `${form.firstName} ${form.lastName}'s profile has been updated.`, type: 'info' });
       } else {
         const res = await employeeService.create(form);
         setEmployees(prev => [...prev, res]);
-        toast.success('Employee added');
+        toast.success(`${res.firstName} ${res.lastName} added`);
+        addNotification({ title: 'New Employee Added', message: `${res.firstName} ${res.lastName} has been added to ${res.departmentName || 'the organisation'}.`, type: 'success' });
       }
       setDialogOpen(false);
     } catch (error) {
@@ -95,10 +98,12 @@ const EmployeesPage: React.FC = () => {
   };
 
   const handleDelete = async (id: string) => {
+    const emp = employees.find(e => e.id === id);
     try {
       await employeeService.delete(id);
       setEmployees(prev => prev.filter(e => e.id !== id));
-      toast.success('Employee removed');
+      toast.success(`${emp?.firstName} ${emp?.lastName} removed`);
+      addNotification({ title: 'Employee Removed', message: `${emp?.firstName} ${emp?.lastName} has been removed from the system.`, type: 'warning' });
     } catch (error) {
       console.error(error);
       toast.error('Delete failed');
@@ -141,11 +146,6 @@ const EmployeesPage: React.FC = () => {
           <h1 className="text-2xl font-bold">Employees</h1>
           <p className="text-muted-foreground text-sm">{employees.length} total employees</p>
         </div>
-        {isAdmin && (
-          <Button onClick={openAdd}>
-            <Plus size={16} className="mr-2" /> Add Employee
-          </Button>
-        )}
       </div>
 
       <Card className="shadow-sm">
@@ -190,7 +190,7 @@ const EmployeesPage: React.FC = () => {
                     <TableCell className="font-medium">{emp.firstName} {emp.lastName}</TableCell>
                     <TableCell>{emp.email}</TableCell>
                     <TableCell>{emp.departmentName}</TableCell>
-                    <TableCell>{emp.role}</TableCell>
+                    <TableCell>{emp.role?.replace('ROLE_', '') ?? '—'}</TableCell>
                     <TableCell>
                       <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusColor(emp.status)}`}>
                         {emp.status}
@@ -238,7 +238,7 @@ const EmployeesPage: React.FC = () => {
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>{editing ? 'Edit' : 'Add'} Employee</DialogTitle>
+            <DialogTitle>Edit Employee</DialogTitle>
           </DialogHeader>
           <div className="grid gap-4 py-2">
             <div className="grid grid-cols-2 gap-4">
@@ -280,7 +280,14 @@ const EmployeesPage: React.FC = () => {
               </div>
               <div className="space-y-1">
                 <Label>Role</Label>
-                <Input value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value }))} />
+                <Select value={form.role} onValueChange={v => setForm(f => ({ ...f, role: v }))}>
+                  <SelectTrigger><SelectValue placeholder="Select role" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ROLE_EMPLOYEE">Employee</SelectItem>
+                    <SelectItem value="ROLE_MANAGER">Manager</SelectItem>
+                    <SelectItem value="ROLE_ADMIN">Admin</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             </div>
             <div className="grid grid-cols-2 gap-4">
@@ -303,7 +310,7 @@ const EmployeesPage: React.FC = () => {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
-            <Button onClick={handleSave}>{editing ? 'Update' : 'Add'}</Button>
+            <Button onClick={handleSave}>Update</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -319,7 +326,7 @@ const EmployeesPage: React.FC = () => {
                 ['Email',      viewing.email],
                 ['Phone',      viewing.phone],
                 ['Department', viewing.departmentName],
-                ['Role',       viewing.role],
+                ['Role',       viewing.role?.replace('ROLE_', '') ?? '—'],
                 ['Joined',     viewing.dateOfJoining],
                 ['Status',     viewing.status],
               ] as [string, string][]).map(([label, val]) => (

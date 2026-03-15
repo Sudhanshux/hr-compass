@@ -1,70 +1,279 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent } from '@/components/ui/dialog';
-import { DollarSign, Eye, Printer, X, Lock } from 'lucide-react';
-import { mockPayslips } from '@/data/mock-data';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { DollarSign, Eye, Printer, Lock, Plus, Pencil } from 'lucide-react';
 import { PayslipData } from '@/types/models';
+import { payrollService } from '@/services/payroll.service';
+import type { PayrollPayload } from '@/services/payroll.service';
+import { settingsService } from '@/services/settings.service';
 import { useAuth } from '@/contexts/AuthContext';
 import { usePermissions } from '@/hooks/usePermissions';
+import { useToast } from '@/hooks/use-toast';
+import { useNotifications } from '@/contexts/NotificationContext';
+import { User } from '@/types/models';
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+/** Format as Indian Rupees (e.g. ₹1,23,456) */
+const inr = (amount: number | undefined) => {
+  if (amount == null) return '₹0';
+  return new Intl.NumberFormat('en-IN', {
+    style: 'currency',
+    currency: 'INR',
+    maximumFractionDigits: 0,
+  }).format(amount);
+};
+
+/** Convert YYYY-MM to human-readable "March 2026" */
+const fmtMonth = (m: string) => {
+  if (!m) return m;
+  const [y, mo] = m.split('-');
+  return new Date(Number(y), Number(mo) - 1, 1).toLocaleString('en-IN', { month: 'long', year: 'numeric' });
+};
+
+type FormState = {
+  employeeId: string;
+  month: string;
+  paidDays: number | '';
+  lopDays: number | '';
+  basicSalary: number | '';
+  hra: number | '';
+  da: number | '';
+  transportAllowance: number | '';
+  medicalAllowance: number | '';
+  specialAllowance: number | '';
+  providentFund: number | '';
+  esi: number | '';
+  professionalTax: number | '';
+  incomeTax: number | '';
+};
+
+const EMPTY_FORM: FormState = {
+  employeeId: '',
+  month: '',
+  paidDays: 26,
+  lopDays: '',
+  basicSalary: '',
+  hra: '',
+  da: '',
+  transportAllowance: '',
+  medicalAllowance: '',
+  specialAllowance: '',
+  providentFund: '',
+  esi: '',
+  professionalTax: 200,
+  incomeTax: '',
+};
+
+// ── Component ─────────────────────────────────────────────────────────────────
 
 const PayrollPage: React.FC = () => {
   const { user } = useAuth();
   const { canViewAllPayslips } = usePermissions();
+  const { toast } = useToast();
+  const { addNotification } = useNotifications();
+
+  const [payslips, setPayslips] = useState<PayslipData[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  // Users list for employee dropdown (admin only)
+  const [users, setUsers] = useState<User[]>([]);
+
+  // View dialog
   const [viewOpen, setViewOpen] = useState(false);
   const [viewing, setViewing] = useState<PayslipData | null>(null);
   const payslipRef = useRef<HTMLDivElement>(null);
 
-  // Filter payslips based on role
-  const visiblePayslips = canViewAllPayslips
-    ? mockPayslips
-    : mockPayslips.filter(p => p.employeeId === user?.id || p.employeeName === user?.name);
+  // Generate / Edit dialog
+  const [formOpen, setFormOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [payload, setPayload] = useState<FormState>(EMPTY_FORM);
 
-  const openView = (p: PayslipData) => { setViewing(p); setViewOpen(true); };
+  // ── Data loading ──────────────────────────────────────────────────────────
+
+  const loadPayslips = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = canViewAllPayslips
+        ? await payrollService.getAll()
+        : await payrollService.getMine();
+      setPayslips(data);
+    } catch {
+      toast({ title: 'Failed to load payslips', variant: 'destructive' });
+    } finally {
+      setLoading(false);
+    }
+  }, [canViewAllPayslips, toast]);
+
+  useEffect(() => { loadPayslips(); }, [loadPayslips]);
+
+  useEffect(() => {
+    if (canViewAllPayslips) {
+      settingsService.getUsers().then(setUsers).catch(() => {});
+    }
+  }, [canViewAllPayslips]);
+
+  // ── Payslip summary stats ─────────────────────────────────────────────────
+
+  const totalPayroll = payslips.reduce((s, p) => s + (p.netSalary ?? 0), 0);
+  const avgSalary = payslips.length ? Math.round(totalPayroll / payslips.length) : 0;
+  const currentMonth = new Date().toISOString().slice(0, 7);
+  const paidThisMonth = payslips.filter(p => p.month === currentMonth).length;
+
+  // ── Derived view values ───────────────────────────────────────────────────
+
+  const grossEarnings = viewing ? (viewing.grossSalary ?? 0) : 0;
+  const totalDeductions = viewing ? (viewing.totalDeductions ?? 0) : 0;
+
+  // ── Print ─────────────────────────────────────────────────────────────────
 
   const handlePrint = () => {
     if (!payslipRef.current) return;
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) return;
-    printWindow.document.write(`
-      <html><head><title>Payslip - ${viewing?.employeeName}</title>
+    const win = window.open('', '_blank');
+    if (!win) return;
+    win.document.write(`<html><head><title>Payslip - ${viewing?.employeeName}</title>
       <style>
-        body { font-family: 'Segoe UI', Arial, sans-serif; margin: 0; padding: 40px; color: #1a1a1a; }
-        .payslip { max-width: 700px; margin: 0 auto; }
-        table { width: 100%; border-collapse: collapse; margin-bottom: 24px; }
-        th { background: #f3f4f6; text-align: left; padding: 10px 14px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; color: #555; border-bottom: 2px solid #e5e7eb; }
-        td { padding: 10px 14px; font-size: 14px; border-bottom: 1px solid #f0f0f0; }
-        @media print { body { padding: 20px; } }
-      </style></head><body>
-      ${payslipRef.current.innerHTML}
-      </body></html>
-    `);
-    printWindow.document.close();
-    printWindow.print();
+        *{box-sizing:border-box}
+        body{font-family:'Segoe UI',Arial,sans-serif;margin:0;padding:0;color:#111;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+        @media print{@page{margin:12mm}}
+      </style></head><body>${payslipRef.current.innerHTML}</body></html>`);
+    win.document.close();
+    win.print();
   };
 
-  const grossEarnings = viewing
-    ? viewing.basicSalary + viewing.hra + viewing.transportAllowance + viewing.medicalAllowance
-    : 0;
-  const totalDeductions = viewing ? viewing.tax + viewing.providentFund : 0;
+  // ── Form helpers ──────────────────────────────────────────────────────────
+
+  const set = (k: keyof FormState, v: string | number) =>
+    setPayload(prev => ({ ...prev, [k]: v }));
+
+  const num = (v: string): number | '' => v === '' ? '' : (parseFloat(v) || 0);
+
+  /** Auto-compute common Indian payroll components from basic salary */
+  const autoFill = (basic: number | '') => {
+    const b = Number(basic) || 0;
+    setPayload(prev => ({
+      ...prev,
+      basicSalary: basic,
+      hra: b > 0 ? Math.round(b * 0.4) : prev.hra,
+      da: b > 0 ? Math.round(b * 0.1) : prev.da,
+      providentFund: b > 0 ? Math.round(b * 0.12) : prev.providentFund,
+    }));
+  };
+
+  const openGenerate = () => {
+    setEditingId(null);
+    setPayload(EMPTY_FORM);
+    setFormOpen(true);
+  };
+
+  const openEdit = (p: PayslipData) => {
+    setEditingId(p.id);
+    setPayload({
+      employeeId: p.employeeId,
+      month: p.month,
+      paidDays: p.paidDays ?? 26,
+      lopDays: p.lopDays ?? '',
+      basicSalary: p.basicSalary,
+      hra: p.hra,
+      da: p.da,
+      transportAllowance: p.transportAllowance,
+      medicalAllowance: p.medicalAllowance,
+      specialAllowance: p.specialAllowance,
+      providentFund: p.providentFund,
+      esi: p.esi,
+      professionalTax: p.professionalTax,
+      incomeTax: p.incomeTax,
+    });
+    setFormOpen(true);
+  };
+
+  const toApiPayload = (): PayrollPayload => ({
+    employeeId: payload.employeeId,
+    month: payload.month,
+    paidDays: payload.paidDays === '' ? undefined : Number(payload.paidDays),
+    lopDays: payload.lopDays === '' ? undefined : Number(payload.lopDays),
+    basicSalary: Number(payload.basicSalary) || 0,
+    hra: Number(payload.hra) || 0,
+    da: Number(payload.da) || 0,
+    transportAllowance: Number(payload.transportAllowance) || 0,
+    medicalAllowance: Number(payload.medicalAllowance) || 0,
+    specialAllowance: Number(payload.specialAllowance) || 0,
+    providentFund: Number(payload.providentFund) || 0,
+    esi: Number(payload.esi) || 0,
+    professionalTax: Number(payload.professionalTax) || 0,
+    incomeTax: Number(payload.incomeTax) || 0,
+  });
+
+  const handleSave = async () => {
+    if (!payload.employeeId || !payload.month) {
+      toast({ title: 'Employee and month are required', variant: 'destructive' });
+      return;
+    }
+    setSaving(true);
+    try {
+      const apiPayload = toApiPayload();
+      if (editingId) {
+        const updated = await payrollService.update(editingId, apiPayload);
+        setPayslips(prev => prev.map(p => p.id === editingId ? updated : p));
+        const empName = payslips.find(p => p.id === editingId)?.employeeName ?? 'Employee';
+        toast({ title: `Payslip updated — ${empName}`, description: fmtMonth(apiPayload.month) });
+        addNotification({ title: 'Payslip Updated', message: `${empName}'s payslip for ${fmtMonth(apiPayload.month)} has been updated.`, type: 'info' });
+      } else {
+        const created = await payrollService.generate(apiPayload);
+        setPayslips(prev => [created, ...prev]);
+        const empUser = users.find(u => u.id === payload.employeeId);
+        const empName = empUser ? `${empUser.firstName} ${empUser.lastName}` : 'Employee';
+        toast({ title: `Payslip generated — ${empName}`, description: fmtMonth(apiPayload.month) });
+        addNotification({ title: 'Payslip Generated', message: `Payslip for ${empName} (${fmtMonth(apiPayload.month)}) generated. Net Pay: ${inr(created.netSalary)}.`, type: 'success' });
+      }
+      setFormOpen(false);
+    } catch (e: any) {
+      toast({ title: e?.message ?? 'Failed to save payslip', variant: 'destructive' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // ── Preview gross / net in form ───────────────────────────────────────────
+
+  const n = (v: number | '') => Number(v) || 0;
+  const previewGross = n(payload.basicSalary) + n(payload.hra) + n(payload.da) +
+    n(payload.transportAllowance) + n(payload.medicalAllowance) + n(payload.specialAllowance);
+  const previewDeductions = n(payload.providentFund) + n(payload.esi) +
+    n(payload.professionalTax) + n(payload.incomeTax);
+  const previewNet = previewGross - previewDeductions;
+
+  // ─────────────────────────────────────────────────────────────────────────
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Payroll</h1>
-        <p className="text-sm text-muted-foreground">
-          {canViewAllPayslips ? 'Salary structure & payslips' : 'Your payslips'}
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">Payroll</h1>
+          <p className="text-sm text-muted-foreground">
+            {canViewAllPayslips ? 'Manage salary structure & payslips' : 'Your payslips'}
+          </p>
+        </div>
+        {canViewAllPayslips && (
+          <Button onClick={openGenerate} className="gap-2">
+            <Plus size={16} /> Generate Payslip
+          </Button>
+        )}
       </div>
 
-      {/* Summary cards - admin/manager only */}
+      {/* Summary cards — admin only */}
       {canViewAllPayslips && (
         <div className="grid gap-4 sm:grid-cols-3">
           {[
-            { label: 'Total Payroll', value: '$45,650', desc: 'This month' },
-            { label: 'Avg Salary', value: '$8,500', desc: 'Per employee' },
-            { label: 'Employees Paid', value: '3 / 10', desc: 'February 2026' },
+            { label: 'Total Payroll', value: inr(totalPayroll), desc: 'All payslips' },
+            { label: 'Avg Net Salary', value: inr(avgSalary), desc: 'Per employee' },
+            { label: 'This Month', value: `${paidThisMonth} payslips`, desc: fmtMonth(currentMonth) },
           ].map(c => (
             <Card key={c.label} className="shadow-sm">
               <CardContent className="flex items-center gap-4 p-5">
@@ -82,40 +291,56 @@ const PayrollPage: React.FC = () => {
         </div>
       )}
 
-      {visiblePayslips.length === 0 ? (
+      {/* Payslip table */}
+      {loading ? (
+        <Card className="shadow-sm"><CardContent className="p-10 text-center text-muted-foreground">Loading…</CardContent></Card>
+      ) : payslips.length === 0 ? (
         <Card className="shadow-sm">
           <CardContent className="p-10 text-center">
             <Lock size={40} className="mx-auto text-muted-foreground mb-3" />
-            <p className="text-muted-foreground">No payslips available for your account.</p>
+            <p className="text-muted-foreground">No payslips available.</p>
           </CardContent>
         </Card>
       ) : (
         <Card className="shadow-sm">
           <CardHeader><CardTitle className="text-base">
-            {canViewAllPayslips ? 'Payslips — February 2026' : 'My Payslips'}
+            {canViewAllPayslips ? 'All Payslips' : 'My Payslips'}
           </CardTitle></CardHeader>
           <CardContent className="p-0">
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Employee</TableHead>
+                  {canViewAllPayslips && <TableHead>Employee</TableHead>}
+                  <TableHead>Month</TableHead>
                   <TableHead>Basic</TableHead>
-                  <TableHead>HRA</TableHead>
+                  <TableHead>Gross</TableHead>
                   <TableHead>Deductions</TableHead>
-                  <TableHead>Net Salary</TableHead>
-                  <TableHead className="text-right">View</TableHead>
+                  <TableHead>Net Pay</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {visiblePayslips.map(p => (
+                {payslips.map(p => (
                   <TableRow key={p.id}>
-                    <TableCell className="font-medium">{p.employeeName}</TableCell>
-                    <TableCell>${p.basicSalary.toLocaleString()}</TableCell>
-                    <TableCell>${p.hra.toLocaleString()}</TableCell>
-                    <TableCell className="text-destructive">${(p.tax + p.providentFund).toLocaleString()}</TableCell>
-                    <TableCell className="font-semibold">${p.netSalary.toLocaleString()}</TableCell>
+                    {canViewAllPayslips && <TableCell className="font-medium">{p.employeeName}</TableCell>}
+                    <TableCell>{fmtMonth(p.month)}</TableCell>
+                    <TableCell>{inr(p.basicSalary)}</TableCell>
+                    <TableCell>{inr(p.grossSalary)}</TableCell>
+                    <TableCell className="text-destructive">{inr(p.totalDeductions)}</TableCell>
+                    <TableCell className="font-semibold text-green-700">{inr(p.netSalary)}</TableCell>
                     <TableCell className="text-right">
-                      <Button variant="ghost" size="icon" onClick={() => openView(p)}><Eye size={16} /></Button>
+                      <div className="flex justify-end gap-1">
+                        <Button variant="ghost" size="icon" title="View payslip"
+                          onClick={() => { setViewing(p); setViewOpen(true); }}>
+                          <Eye size={16} />
+                        </Button>
+                        {canViewAllPayslips && (
+                          <Button variant="ghost" size="icon" title="Edit payslip"
+                            onClick={() => openEdit(p)}>
+                            <Pencil size={16} />
+                          </Button>
+                        )}
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -125,121 +350,277 @@ const PayrollPage: React.FC = () => {
         </Card>
       )}
 
-      {/* PDF-like Payslip Preview */}
+      {/* ── View / Print Payslip Dialog ─────────────────────────────────── */}
       <Dialog open={viewOpen} onOpenChange={setViewOpen}>
-        <DialogContent className="max-w-2xl p-0 overflow-hidden" aria-describedby={undefined}>
-          <div className="flex items-center justify-between px-6 py-3 border-b bg-muted/50">
-            <span className="sr-only">Payslip Preview</span>
+        <DialogContent className="max-w-3xl p-0 overflow-hidden" aria-describedby={undefined}>
+          {/* Toolbar — no extra X button; DialogContent already provides one */}
+          <div className="flex items-center justify-between px-5 py-2.5 border-b bg-muted/40">
             <span className="text-sm font-medium text-muted-foreground">Payslip Preview</span>
-            <div className="flex gap-2">
-              <Button variant="outline" size="sm" className="gap-1.5" onClick={handlePrint}>
-                <Printer size={14} /> Print / Save PDF
-              </Button>
-              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setViewOpen(false)}>
-                <X size={16} />
-              </Button>
-            </div>
+            <Button variant="outline" size="sm" className="gap-1.5 mr-7" onClick={handlePrint}>
+              <Printer size={14} /> Print / Save PDF
+            </Button>
           </div>
+
           {viewing && (
-            <div className="p-8 max-h-[80vh] overflow-y-auto">
-              <div ref={payslipRef} className="payslip">
-                {/* Header */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '3px solid hsl(var(--primary))', paddingBottom: '16px', marginBottom: '24px' }}>
+            <div className="max-h-[82vh] overflow-y-auto">
+              <div ref={payslipRef} style={{ fontFamily:"'Segoe UI',Arial,sans-serif", background:'#fff', color:'#111' }}>
+
+                {/* Colour bar */}
+                <div style={{ background:'#1e3a5f', height:'8px' }} />
+
+                {/* Company header */}
+                <div style={{ padding:'20px 28px 14px', borderBottom:'1px solid #d1d5db', display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
                   <div>
-                    <div style={{ fontSize: '22px', fontWeight: 700, color: 'hsl(var(--primary))' }}>HRMS Corp.</div>
-                    <div style={{ fontSize: '12px', color: 'hsl(var(--muted-foreground))' }}>123 Business Ave, Suite 100</div>
-                    <div style={{ fontSize: '12px', color: 'hsl(var(--muted-foreground))' }}>contact@hrmscorp.com</div>
-                  </div>
-                  <div style={{ textAlign: 'right' }}>
-                    <div style={{ fontSize: '18px', fontWeight: 600 }}>PAYSLIP</div>
-                    <div style={{ fontSize: '13px', color: 'hsl(var(--muted-foreground))' }}>{viewing.month}</div>
-                    <div style={{ fontSize: '11px', color: 'hsl(var(--muted-foreground))' }}>ID: PS-{viewing.id.padStart(4, '0')}</div>
-                  </div>
-                </div>
-
-                {/* Employee Info */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '24px' }}>
-                  {[
-                    ['Employee Name', viewing.employeeName],
-                    ['Employee ID', `EMP-${viewing.employeeId.padStart(4, '0')}`],
-                    ['Pay Period', viewing.month],
-                    ['Pay Date', '28 Feb 2026'],
-                  ].map(([label, val]) => (
-                    <div key={label as string}>
-                      <div style={{ fontSize: '11px', color: 'hsl(var(--muted-foreground))', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{label}</div>
-                      <div style={{ fontSize: '14px', fontWeight: 500, marginTop: '2px' }}>{val}</div>
+                    <div style={{ fontSize:'20px', fontWeight:700, color:'#1e3a5f', letterSpacing:'.3px' }}>
+                      {user?.organizationName ?? 'Organisation'}
                     </div>
-                  ))}
+                    <div style={{ fontSize:'11px', color:'#6b7280', marginTop:'3px' }}>
+                      Salary Slip — Confidential
+                    </div>
+                  </div>
+                  <div style={{ textAlign:'right' }}>
+                    <div style={{ fontSize:'15px', fontWeight:700, color:'#1e3a5f', letterSpacing:'1px' }}>
+                      PAYSLIP
+                    </div>
+                    <div style={{ fontSize:'12px', color:'#374151', marginTop:'2px' }}>{fmtMonth(viewing.month)}</div>
+                    <div style={{ fontSize:'10px', color:'#9ca3af', marginTop:'1px' }}>Ref: {viewing.id.slice(-8).toUpperCase()}</div>
+                  </div>
                 </div>
 
-                {/* Earnings */}
-                <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '24px' }}>
-                  <thead>
-                    <tr style={{ background: 'hsl(var(--muted))' }}>
-                      <th style={{ textAlign: 'left', padding: '10px 14px', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px', color: 'hsl(var(--muted-foreground))', borderBottom: '2px solid hsl(var(--border))' }}>Earnings</th>
-                      <th style={{ textAlign: 'right', padding: '10px 14px', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px', color: 'hsl(var(--muted-foreground))', borderBottom: '2px solid hsl(var(--border))' }}>Amount</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {[
-                      ['Basic Salary', viewing.basicSalary],
-                      ['House Rent Allowance', viewing.hra],
-                      ['Transport Allowance', viewing.transportAllowance],
-                      ['Medical Allowance', viewing.medicalAllowance],
-                    ].map(([label, amount]) => (
-                      <tr key={label as string}>
-                        <td style={{ padding: '10px 14px', fontSize: '14px', borderBottom: '1px solid hsl(var(--border) / 0.5)' }}>{label}</td>
-                        <td style={{ padding: '10px 14px', fontSize: '14px', textAlign: 'right', fontWeight: 500, borderBottom: '1px solid hsl(var(--border) / 0.5)' }}>${(amount as number).toLocaleString()}</td>
+                {/* Employee details grid */}
+                <div style={{ background:'#f8fafc', padding:'14px 28px', borderBottom:'1px solid #e5e7eb' }}>
+                  <table style={{ width:'100%', borderCollapse:'collapse' }}>
+                    <tbody>
+                      <tr>
+                        {[
+                          ['Employee Name', viewing.employeeName],
+                          ['Employee ID', `EMP-${viewing.employeeId.slice(-5).toUpperCase()}`],
+                          ['Pay Period', fmtMonth(viewing.month)],
+                        ].map(([lbl, val]) => (
+                          <td key={lbl as string} style={{ padding:'6px 14px 6px 0', width:'33%', verticalAlign:'top' }}>
+                            <div style={{ fontSize:'9px', color:'#6b7280', textTransform:'uppercase', letterSpacing:'.6px', fontWeight:600 }}>{lbl}</div>
+                            <div style={{ fontSize:'13px', fontWeight:600, color:'#111827', marginTop:'2px' }}>{val}</div>
+                          </td>
+                        ))}
                       </tr>
-                    ))}
-                    <tr style={{ background: 'hsl(var(--muted) / 0.5)' }}>
-                      <td style={{ padding: '10px 14px', fontSize: '14px', fontWeight: 600 }}>Gross Earnings</td>
-                      <td style={{ padding: '10px 14px', fontSize: '14px', textAlign: 'right', fontWeight: 600 }}>${grossEarnings.toLocaleString()}</td>
-                    </tr>
-                  </tbody>
-                </table>
-
-                {/* Deductions */}
-                <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '24px' }}>
-                  <thead>
-                    <tr style={{ background: 'hsl(var(--muted))' }}>
-                      <th style={{ textAlign: 'left', padding: '10px 14px', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px', color: 'hsl(var(--muted-foreground))', borderBottom: '2px solid hsl(var(--border))' }}>Deductions</th>
-                      <th style={{ textAlign: 'right', padding: '10px 14px', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px', color: 'hsl(var(--muted-foreground))', borderBottom: '2px solid hsl(var(--border))' }}>Amount</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {[
-                      ['Income Tax', viewing.tax],
-                      ['Provident Fund', viewing.providentFund],
-                    ].map(([label, amount]) => (
-                      <tr key={label as string}>
-                        <td style={{ padding: '10px 14px', fontSize: '14px', borderBottom: '1px solid hsl(var(--border) / 0.5)' }}>{label}</td>
-                        <td style={{ padding: '10px 14px', fontSize: '14px', textAlign: 'right', fontWeight: 500, color: 'hsl(var(--destructive))', borderBottom: '1px solid hsl(var(--border) / 0.5)' }}>-${(amount as number).toLocaleString()}</td>
+                      <tr>
+                        {[
+                          ['Designation', viewing.designation ?? '—'],
+                          ['Department', viewing.department ?? '—'],
+                          ['Paid Days / LOP', `${viewing.paidDays ?? 26} / ${viewing.lopDays ?? 0}`],
+                        ].map(([lbl, val]) => (
+                          <td key={lbl as string} style={{ padding:'6px 14px 0 0', width:'33%', verticalAlign:'top' }}>
+                            <div style={{ fontSize:'9px', color:'#6b7280', textTransform:'uppercase', letterSpacing:'.6px', fontWeight:600 }}>{lbl}</div>
+                            <div style={{ fontSize:'13px', fontWeight:600, color:'#111827', marginTop:'2px' }}>{val}</div>
+                          </td>
+                        ))}
                       </tr>
-                    ))}
-                    <tr style={{ background: 'hsl(var(--muted) / 0.5)' }}>
-                      <td style={{ padding: '10px 14px', fontSize: '14px', fontWeight: 600 }}>Total Deductions</td>
-                      <td style={{ padding: '10px 14px', fontSize: '14px', textAlign: 'right', fontWeight: 600, color: 'hsl(var(--destructive))' }}>-${totalDeductions.toLocaleString()}</td>
-                    </tr>
-                  </tbody>
-                </table>
-
-                {/* Net Pay */}
-                <div style={{ borderTop: '3px solid hsl(var(--primary))', paddingTop: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontSize: '18px', fontWeight: 700 }}>Net Pay</span>
-                  <span style={{ fontSize: '24px', fontWeight: 700, color: 'hsl(var(--primary))' }}>${viewing.netSalary.toLocaleString()}</span>
+                    </tbody>
+                  </table>
                 </div>
 
-                <div style={{ textAlign: 'center', fontSize: '11px', color: 'hsl(var(--muted-foreground))', marginTop: '40px', paddingTop: '16px', borderTop: '1px solid hsl(var(--border))' }}>
-                  This is a computer-generated payslip and does not require a signature.
+                {/* Earnings + Deductions side by side */}
+                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'0', padding:'0 28px 0' }}>
+
+                  {/* Earnings */}
+                  <div style={{ paddingRight:'20px', borderRight:'1px solid #e5e7eb', paddingTop:'16px', paddingBottom:'16px' }}>
+                    <div style={{ fontSize:'11px', fontWeight:700, color:'#1e3a5f', textTransform:'uppercase', letterSpacing:'.6px', marginBottom:'8px', paddingBottom:'6px', borderBottom:'2px solid #1e3a5f' }}>
+                      Earnings
+                    </div>
+                    <table style={{ width:'100%', borderCollapse:'collapse' }}>
+                      <tbody>
+                        {[
+                          ['Basic Salary', viewing.basicSalary],
+                          ['House Rent Allowance', viewing.hra],
+                          ['Dearness Allowance', viewing.da],
+                          ['Transport Allowance', viewing.transportAllowance],
+                          ['Medical Allowance', viewing.medicalAllowance],
+                          ['Special Allowance', viewing.specialAllowance],
+                        ].map(([lbl, amt]) => (
+                          <tr key={lbl as string}>
+                            <td style={{ fontSize:'12px', color:'#374151', padding:'5px 0', borderBottom:'1px dashed #f0f0f0' }}>{lbl}</td>
+                            <td style={{ fontSize:'12px', color:'#111827', padding:'5px 0', textAlign:'right', borderBottom:'1px dashed #f0f0f0', fontVariantNumeric:'tabular-nums' }}>{inr(amt as number)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      <tfoot>
+                        <tr style={{ background:'#eff6ff' }}>
+                          <td style={{ fontSize:'12px', fontWeight:700, color:'#1e3a5f', padding:'7px 4px' }}>Gross Earnings</td>
+                          <td style={{ fontSize:'12px', fontWeight:700, color:'#1e3a5f', padding:'7px 4px', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{inr(grossEarnings)}</td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+
+                  {/* Deductions */}
+                  <div style={{ paddingLeft:'20px', paddingTop:'16px', paddingBottom:'16px' }}>
+                    <div style={{ fontSize:'11px', fontWeight:700, color:'#9f1239', textTransform:'uppercase', letterSpacing:'.6px', marginBottom:'8px', paddingBottom:'6px', borderBottom:'2px solid #9f1239' }}>
+                      Deductions
+                    </div>
+                    <table style={{ width:'100%', borderCollapse:'collapse' }}>
+                      <tbody>
+                        {[
+                          ['Provident Fund (EPF)', viewing.providentFund],
+                          ['ESI Contribution', viewing.esi],
+                          ['Professional Tax', viewing.professionalTax],
+                          ['Income Tax (TDS)', viewing.incomeTax],
+                        ].map(([lbl, amt]) => (
+                          <tr key={lbl as string}>
+                            <td style={{ fontSize:'12px', color:'#374151', padding:'5px 0', borderBottom:'1px dashed #f0f0f0' }}>{lbl}</td>
+                            <td style={{ fontSize:'12px', color:'#b91c1c', padding:'5px 0', textAlign:'right', borderBottom:'1px dashed #f0f0f0', fontVariantNumeric:'tabular-nums' }}>{inr(amt as number)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      <tfoot>
+                        <tr style={{ background:'#fff1f2' }}>
+                          <td style={{ fontSize:'12px', fontWeight:700, color:'#9f1239', padding:'7px 4px' }}>Total Deductions</td>
+                          <td style={{ fontSize:'12px', fontWeight:700, color:'#9f1239', padding:'7px 4px', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{inr(totalDeductions)}</td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
                 </div>
+
+                {/* Net pay band */}
+                <div style={{ background:'#1e3a5f', margin:'0 28px', borderRadius:'6px', padding:'12px 18px', display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'20px' }}>
+                  <span style={{ fontSize:'14px', fontWeight:700, color:'#fff', letterSpacing:'.3px' }}>NET PAY (Take Home)</span>
+                  <span style={{ fontSize:'22px', fontWeight:800, color:'#fff', letterSpacing:'.5px', fontVariantNumeric:'tabular-nums' }}>{inr(viewing.netSalary)}</span>
+                </div>
+
+                {/* Footer */}
+                <div style={{ textAlign:'center', fontSize:'10px', color:'#9ca3af', padding:'0 28px 16px', borderTop:'1px solid #f3f4f6', paddingTop:'10px' }}>
+                  This is a computer-generated payslip and does not require a signature. &nbsp;|&nbsp; {user?.organizationName ?? 'Organisation'}
+                </div>
+
               </div>
             </div>
           )}
         </DialogContent>
       </Dialog>
+
+      {/* ── Generate / Edit Payslip Dialog ─────────────────────────────────── */}
+      <Dialog open={formOpen} onOpenChange={setFormOpen}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{editingId ? 'Edit Payslip' : 'Generate Payslip'}</DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            {/* Employee + Month */}
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <Label>Employee *</Label>
+                {editingId ? (
+                  <Input disabled value={payslips.find(p => p.id === editingId)?.employeeName ?? ''} />
+                ) : (
+                  <Select value={payload.employeeId} onValueChange={v => set('employeeId', v)}>
+                    <SelectTrigger><SelectValue placeholder="Select employee" /></SelectTrigger>
+                    <SelectContent>
+                      {users.map(u => (
+                        <SelectItem key={u.id} value={u.id}>
+                          {u.firstName} {u.lastName}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              </div>
+              <div className="space-y-1">
+                <Label>Month (YYYY-MM) *</Label>
+                <Input type="month" value={payload.month} onChange={e => set('month', e.target.value)} />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <Label>Paid Days</Label>
+                <Input type="number" min={0} max={31} value={payload.paidDays}
+                  onChange={e => set('paidDays', num(e.target.value))} />
+              </div>
+              <div className="space-y-1">
+                <Label>LOP Days</Label>
+                <Input type="number" min={0} max={31} value={payload.lopDays}
+                  onChange={e => set('lopDays', num(e.target.value))} />
+              </div>
+            </div>
+
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide pt-2">Earnings</p>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <Label>Basic Salary (₹) *</Label>
+                <Input type="number" min={0} value={payload.basicSalary}
+                  onChange={e => autoFill(num(e.target.value))} />
+              </div>
+              <div className="space-y-1">
+                <Label>HRA (₹)</Label>
+                <Input type="number" min={0} value={payload.hra} onChange={e => set('hra', num(e.target.value))} />
+              </div>
+              <div className="space-y-1">
+                <Label>DA (₹)</Label>
+                <Input type="number" min={0} value={payload.da} onChange={e => set('da', num(e.target.value))} />
+              </div>
+              <div className="space-y-1">
+                <Label>Transport Allowance (₹)</Label>
+                <Input type="number" min={0} value={payload.transportAllowance}
+                  onChange={e => set('transportAllowance', num(e.target.value))} />
+              </div>
+              <div className="space-y-1">
+                <Label>Medical Allowance (₹)</Label>
+                <Input type="number" min={0} value={payload.medicalAllowance}
+                  onChange={e => set('medicalAllowance', num(e.target.value))} />
+              </div>
+              <div className="space-y-1">
+                <Label>Special Allowance (₹)</Label>
+                <Input type="number" min={0} value={payload.specialAllowance}
+                  onChange={e => set('specialAllowance', num(e.target.value))} />
+              </div>
+            </div>
+
+            <div className="rounded-md bg-muted/50 px-4 py-2 text-sm flex justify-between">
+              <span className="font-medium">Gross Earnings</span>
+              <span className="font-semibold">{inr(previewGross)}</span>
+            </div>
+
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide pt-2">Deductions</p>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <Label>Provident Fund / EPF (₹)</Label>
+                <Input type="number" min={0} value={payload.providentFund}
+                  onChange={e => set('providentFund', num(e.target.value))} />
+              </div>
+              <div className="space-y-1">
+                <Label>ESI (₹)</Label>
+                <Input type="number" min={0} value={payload.esi} onChange={e => set('esi', num(e.target.value))} />
+              </div>
+              <div className="space-y-1">
+                <Label>Professional Tax (₹)</Label>
+                <Input type="number" min={0} value={payload.professionalTax}
+                  onChange={e => set('professionalTax', num(e.target.value))} />
+              </div>
+              <div className="space-y-1">
+                <Label>Income Tax / TDS (₹)</Label>
+                <Input type="number" min={0} value={payload.incomeTax}
+                  onChange={e => set('incomeTax', num(e.target.value))} />
+              </div>
+            </div>
+
+            <div className="rounded-md bg-muted/50 px-4 py-2 text-sm flex justify-between">
+              <span className="font-medium">Net Pay</span>
+              <span className="font-bold text-green-700">{inr(previewNet)}</span>
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setFormOpen(false)}>Cancel</Button>
+            <Button onClick={handleSave} disabled={saving}>
+              {saving ? 'Saving…' : editingId ? 'Update Payslip' : 'Generate Payslip'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
+
 
 export default PayrollPage;

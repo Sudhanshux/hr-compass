@@ -1,4 +1,5 @@
-import React, { createContext, useContext, useState, useCallback } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
+import { notificationService, NotificationData } from '@/services/notification.service';
 
 export interface Notification {
   id: string;
@@ -20,37 +21,85 @@ interface NotificationContextType {
 
 const NotificationContext = createContext<NotificationContextType | undefined>(undefined);
 
-const initialNotifications: Notification[] = [
-  { id: '1', title: 'Leave Approved', message: "John Smith's annual leave (Mar 1-5) has been approved.", type: 'success', time: '2 hours ago', read: false },
-  { id: '2', title: 'New Leave Request', message: 'Sarah Johnson has applied for casual leave on Feb 25.', type: 'info', time: '5 hours ago', read: false },
-  { id: '3', title: 'Payslip Generated', message: 'February 2026 payslips are now available.', type: 'info', time: '1 day ago', read: true },
-];
+/** Convert a backend ISO datetime string to a human-readable relative time label. */
+function relativeTime(iso: string): string {
+  try {
+    const diff = Date.now() - new Date(iso).getTime();
+    const mins = Math.floor(diff / 60_000);
+    if (mins < 1)  return 'Just now';
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24)  return `${hrs}h ago`;
+    const days = Math.floor(hrs / 24);
+    return `${days}d ago`;
+  } catch {
+    return 'Just now';
+  }
+}
+
+function toNotification(d: NotificationData): Notification {
+  return {
+    id:      d.id,
+    title:   d.title,
+    message: d.message,
+    type:    d.type,
+    read:    d.read,
+    time:    relativeTime(d.createdAt),
+  };
+}
 
 export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [notifications, setNotifications] = useState<Notification[]>(initialNotifications);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
 
   const unreadCount = notifications.filter(n => !n.read).length;
 
+  // ── Load from backend on mount ──────────────────────────────────────────
+  useEffect(() => {
+    notificationService.getAll()
+      .then(data => setNotifications(data.map(toNotification)))
+      .catch(() => {
+        // Backend may not be reachable during dev; silently fall back to empty
+        setNotifications([]);
+      });
+  }, []);
+
+  // ── Actions ──────────────────────────────────────────────────────────────
+
   const addNotification = useCallback((n: Omit<Notification, 'id' | 'time' | 'read'>) => {
-    const newNotif: Notification = {
+    // Optimistic: show immediately in UI
+    const optimistic: Notification = {
       ...n,
-      id: Date.now().toString(),
+      id:   `opt-${Date.now()}`,
       time: 'Just now',
       read: false,
     };
-    setNotifications(prev => [newNotif, ...prev]);
+    setNotifications(prev => [optimistic, ...prev]);
+
+    // Persist to backend and replace optimistic entry with real one
+    notificationService.create({ title: n.title, message: n.message, type: n.type })
+      .then(created => {
+        setNotifications(prev =>
+          prev.map(x => x.id === optimistic.id ? toNotification(created) : x)
+        );
+      })
+      .catch(() => {
+        // Keep optimistic entry if backend call fails so UI is not disrupted
+      });
   }, []);
 
   const markRead = useCallback((id: string) => {
     setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
+    notificationService.markRead(id).catch(() => {});
   }, []);
 
   const markAllRead = useCallback(() => {
     setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+    notificationService.markAllRead().catch(() => {});
   }, []);
 
   const clearAll = useCallback(() => {
     setNotifications([]);
+    notificationService.clearAll().catch(() => {});
   }, []);
 
   return (

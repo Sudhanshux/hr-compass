@@ -1,16 +1,81 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
-import { Separator } from '@/components/ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Mail, Phone, Building2, Calendar, Shield, User as UserIcon, MapPin, Globe, FileText, Download, CreditCard, Briefcase, GraduationCap } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { Mail, Phone, Building2, Calendar, Shield, User as UserIcon, Briefcase, CreditCard, Users } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
+import { authService } from '@/services/auth.service';
+import { orgChartService } from '@/services/orgchart.service';
+import { Employee, OrgNode } from '@/types/models';
+import { toast } from 'sonner';
 
 const ProfilePage: React.FC = () => {
   const { user } = useAuth();
-  const initials = user?.name?.split(' ').map(n => n[0]).join('').toUpperCase() || 'U';
+  const [employee, setEmployee] = useState<Employee | null>(null);
+  const [reportingChain, setReportingChain] = useState<OrgNode[]>([]);
+  const [directReports, setDirectReports] = useState<OrgNode[]>([]);
+  const [colleagues, setColleagues] = useState<OrgNode[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const initials = employee
+    ? `${employee.firstName?.[0] ?? ''}${employee.lastName?.[0] ?? ''}`.toUpperCase()
+    : user?.name?.split(' ').map(n => n[0]).join('').toUpperCase() || 'U';
+
+  useEffect(() => {
+    if (!user?.id) return;
+
+    const fetchData = async () => {
+      try {
+        setLoading(true);
+        const [emp, chain, reports] = await Promise.all([
+          authService.me(),
+          orgChartService.getReportingChain(user.id).catch(() => []),
+          orgChartService.getDirectReports(user.id).catch(() => []),
+        ]);
+        setEmployee(emp);
+        setReportingChain(chain);
+        setDirectReports(reports);
+
+        // chain is ordered root-first; the second-to-last is the direct manager
+        const manager = chain.length >= 2 ? chain[chain.length - 2] : null;
+        if (manager) {
+          const peers = await orgChartService.getDirectReports(manager.employeeId).catch(() => []);
+          setColleagues(peers.filter(p => p.employeeId !== user.id));
+        }
+      } catch (err) {
+        toast.error('Failed to load profile');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchData();
+  }, [user?.id]);
+
+  const formatDate = (val?: string) => {
+    if (!val) return '—';
+    try { return new Date(val).toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' }); }
+    catch { return val; }
+  };
+
+  const manager = reportingChain.length >= 2 ? reportingChain[reportingChain.length - 2] : null;
+
+  const PersonCard = ({ node, label }: { node: OrgNode; label?: string }) => (
+    <div className="flex items-center gap-3 p-3 rounded-lg border bg-card">
+      <Avatar className="h-10 w-10">
+        <AvatarFallback className="bg-primary/10 text-primary text-sm font-semibold">
+          {`${node.firstName?.[0] ?? ''}${node.lastName?.[0] ?? ''}`.toUpperCase()}
+        </AvatarFallback>
+      </Avatar>
+      <div className="min-w-0">
+        {label && <p className="text-[10px] text-muted-foreground uppercase tracking-wide mb-0.5">{label}</p>}
+        <p className="text-sm font-medium truncate">{node.fullName}</p>
+        <p className="text-xs text-muted-foreground truncate">{node.designation || node.role?.replace('ROLE_', '') || '—'}</p>
+        {node.departmentName && <p className="text-xs text-muted-foreground truncate">{node.departmentName}</p>}
+      </div>
+    </div>
+  );
 
   return (
     <div className="max-w-3xl mx-auto space-y-6">
@@ -27,8 +92,17 @@ const ProfilePage: React.FC = () => {
               </AvatarFallback>
             </Avatar>
             <div className="pb-1">
-              <h2 className="text-xl font-semibold">{user?.name}</h2>
-              <Badge variant="outline" className="capitalize mt-1">{user?.role}</Badge>
+              <h2 className="text-xl font-semibold">
+                {employee ? `${employee.firstName} ${employee.lastName}` : user?.name}
+              </h2>
+              <div className="flex items-center gap-2 mt-1">
+                <Badge variant="outline" className="capitalize">
+                  {employee?.role?.replace('ROLE_', '') ?? user?.role}
+                </Badge>
+                {employee?.designation && (
+                  <span className="text-sm text-muted-foreground">{employee.designation}</span>
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -39,7 +113,7 @@ const ProfilePage: React.FC = () => {
         <TabsList>
           <TabsTrigger value="personal" className="gap-2"><UserIcon size={16} /> Personal</TabsTrigger>
           <TabsTrigger value="work" className="gap-2"><Briefcase size={16} /> Work</TabsTrigger>
-          <TabsTrigger value="documents" className="gap-2"><FileText size={16} /> Documents</TabsTrigger>
+          <TabsTrigger value="team" className="gap-2"><Users size={16} /> Team</TabsTrigger>
         </TabsList>
 
         {/* Personal Tab */}
@@ -47,30 +121,28 @@ const ProfilePage: React.FC = () => {
           <Card className="shadow-sm">
             <CardHeader><CardTitle className="text-base">Personal Information</CardTitle></CardHeader>
             <CardContent>
-              <div className="grid gap-5 sm:grid-cols-2">
-                {[
-                  { icon: UserIcon, label: 'Full Name', value: user?.name },
-                  { icon: Mail, label: 'Email Address', value: user?.email },
-                  { icon: Phone, label: 'Phone', value: '+1 555-0101' },
-                  { icon: Calendar, label: 'Date of Birth', value: 'January 15, 1990' },
-                  { icon: MapPin, label: 'Address', value: '123 Main Street, San Francisco, CA 94102' },
-                  { icon: Globe, label: 'Nationality', value: 'United States' },
-                  { icon: UserIcon, label: 'Gender', value: 'Male' },
-                  { icon: Phone, label: 'Emergency Contact', value: '+1 555-0199 (Jane Smith)' },
-                  { icon: CreditCard, label: 'Blood Group', value: 'O+' },
-                  { icon: Mail, label: 'Personal Email', value: 'john.personal@email.com' },
-                ].map(({ icon: Icon, label, value }) => (
-                  <div key={label} className="flex items-start gap-3">
-                    <div className="rounded-lg bg-muted p-2">
-                      <Icon size={18} className="text-primary" />
+              {loading ? (
+                <p className="text-sm text-muted-foreground">Loading...</p>
+              ) : (
+                <div className="grid gap-5 sm:grid-cols-2">
+                  {[
+                    { icon: UserIcon,   label: 'Full Name',      value: employee ? `${employee.firstName} ${employee.lastName}` : user?.name },
+                    { icon: Mail,       label: 'Email Address',  value: employee?.email ?? user?.email },
+                    { icon: Phone,      label: 'Phone',          value: employee?.phone },
+                    { icon: CreditCard, label: 'Employee ID',    value: user?.employeeId ?? user?.id },
+                  ].map(({ icon: Icon, label, value }) => (
+                    <div key={label} className="flex items-start gap-3">
+                      <div className="rounded-lg bg-muted p-2">
+                        <Icon size={18} className="text-primary" />
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">{label}</p>
+                        <p className="text-sm font-medium">{value || '—'}</p>
+                      </div>
                     </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">{label}</p>
-                      <p className="text-sm font-medium">{value || '—'}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
@@ -80,92 +152,106 @@ const ProfilePage: React.FC = () => {
           <Card className="shadow-sm">
             <CardHeader><CardTitle className="text-base">Work Information</CardTitle></CardHeader>
             <CardContent>
-              <div className="grid gap-5 sm:grid-cols-2">
-                {[
-                  { icon: CreditCard, label: 'Employee ID', value: user?.id },
-                  { icon: Shield, label: 'Role', value: user?.role, capitalize: true },
-                  { icon: Building2, label: 'Department', value: 'Engineering' },
-                  { icon: Briefcase, label: 'Designation', value: 'Senior Developer' },
-                  { icon: Calendar, label: 'Date of Joining', value: 'March 15, 2021' },
-                  { icon: UserIcon, label: 'Reporting Manager', value: 'Michael Chen' },
-                  { icon: MapPin, label: 'Work Location', value: 'San Francisco HQ' },
-                  { icon: Briefcase, label: 'Employment Type', value: 'Full-time' },
-                  { icon: GraduationCap, label: 'Experience', value: '5 Years' },
-                  { icon: CreditCard, label: 'PAN', value: 'XXXXX1234X' },
-                ].map(({ icon: Icon, label, value, capitalize }) => (
-                  <div key={label} className="flex items-start gap-3">
-                    <div className="rounded-lg bg-muted p-2">
-                      <Icon size={18} className="text-primary" />
+              {loading ? (
+                <p className="text-sm text-muted-foreground">Loading...</p>
+              ) : (
+                <div className="grid gap-5 sm:grid-cols-2">
+                  {[
+                    { icon: Shield,    label: 'Role',               value: employee?.role?.replace('ROLE_', '') ?? user?.role, capitalize: true },
+                    { icon: Briefcase, label: 'Designation',        value: employee?.designation },
+                    { icon: Building2, label: 'Department',         value: employee?.departmentName },
+                    { icon: Calendar,  label: 'Date of Joining',    value: formatDate(employee?.dateOfJoining) },
+                    { icon: UserIcon,  label: 'Reporting Manager',  value: employee?.reportingManagerName },
+                    { icon: CreditCard,label: 'Status',             value: employee?.status },
+                  ].map(({ icon: Icon, label, value, capitalize }) => (
+                    <div key={label} className="flex items-start gap-3">
+                      <div className="rounded-lg bg-muted p-2">
+                        <Icon size={18} className="text-primary" />
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">{label}</p>
+                        <p className={`text-sm font-medium ${capitalize ? 'capitalize' : ''}`}>{value || '—'}</p>
+                      </div>
                     </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">{label}</p>
-                      <p className={`text-sm font-medium ${capitalize ? 'capitalize' : ''}`}>{value || '—'}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="shadow-sm mt-4">
-            <CardHeader><CardTitle className="text-base">Bank Details</CardTitle></CardHeader>
-            <CardContent>
-              <div className="grid gap-5 sm:grid-cols-2">
-                {[
-                  { label: 'Bank Name', value: 'Chase Bank' },
-                  { label: 'Account Number', value: '****4582' },
-                  { label: 'Routing Number', value: '****7890' },
-                  { label: 'Account Type', value: 'Checking' },
-                ].map(d => (
-                  <div key={d.label} className="flex items-start gap-3">
-                    <div className="rounded-lg bg-muted p-2">
-                      <CreditCard size={18} className="text-primary" />
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">{d.label}</p>
-                      <p className="text-sm font-medium">{d.value}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
 
-        {/* Documents Tab */}
-        <TabsContent value="documents">
-          <Card className="shadow-sm">
-            <CardHeader><CardTitle className="text-base">My Documents</CardTitle></CardHeader>
-            <CardContent>
-              <div className="space-y-3">
-                {[
-                  { name: 'Offer Letter', date: 'March 15, 2021', type: 'PDF' },
-                  { name: 'Employment Contract', date: 'March 15, 2021', type: 'PDF' },
-                  { name: 'ID Proof (Passport)', date: 'January 10, 2021', type: 'PDF' },
-                  { name: 'Address Proof', date: 'January 10, 2021', type: 'PDF' },
-                  { name: 'Educational Certificates', date: 'February 20, 2021', type: 'ZIP' },
-                  { name: 'Tax Form W-4', date: 'March 20, 2021', type: 'PDF' },
-                  { name: 'NDA Agreement', date: 'March 15, 2021', type: 'PDF' },
-                  { name: 'Performance Review - 2025', date: 'December 15, 2025', type: 'PDF' },
-                ].map(doc => (
-                  <div key={doc.name} className="flex items-center justify-between rounded-lg border p-3">
-                    <div className="flex items-center gap-3">
-                      <div className="rounded-lg bg-muted p-2">
-                        <FileText size={18} className="text-primary" />
-                      </div>
-                      <div>
-                        <p className="text-sm font-medium">{doc.name}</p>
-                        <p className="text-xs text-muted-foreground">Uploaded: {doc.date} · {doc.type}</p>
-                      </div>
-                    </div>
-                    <Button variant="ghost" size="icon" className="shrink-0">
-                      <Download size={16} />
-                    </Button>
+        {/* Team Tab */}
+        <TabsContent value="team">
+          <div className="space-y-4">
+            {/* Manager */}
+            {manager && (
+              <Card className="shadow-sm">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Shield size={16} className="text-primary" /> Reporting Manager
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <PersonCard node={manager} />
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Colleagues */}
+            {colleagues.length > 0 && (
+              <Card className="shadow-sm">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Users size={16} className="text-primary" /> Colleagues
+                    <Badge variant="secondary" className="ml-auto">{colleagues.length}</Badge>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {colleagues.map(c => (
+                      <PersonCard key={c.employeeId} node={c} />
+                    ))}
                   </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Direct Reports */}
+            {directReports.length > 0 && (
+              <Card className="shadow-sm">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Users size={16} className="text-primary" /> Direct Reports
+                    <Badge variant="secondary" className="ml-auto">{directReports.length}</Badge>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {directReports.map(r => (
+                      <PersonCard key={r.employeeId} node={r} />
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Empty state */}
+            {!loading && !manager && colleagues.length === 0 && directReports.length === 0 && (
+              <Card className="shadow-sm">
+                <CardContent className="py-10 text-center text-sm text-muted-foreground">
+                  No team structure found. Set a reporting manager on your employee profile to see your team here.
+                </CardContent>
+              </Card>
+            )}
+
+            {loading && (
+              <Card className="shadow-sm">
+                <CardContent className="py-10 text-center text-sm text-muted-foreground">
+                  Loading team...
+                </CardContent>
+              </Card>
+            )}
+          </div>
         </TabsContent>
       </Tabs>
     </div>

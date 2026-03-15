@@ -37,6 +37,8 @@ const login = useCallback(
           : loginData.roles.includes('ROLE_MANAGER')
           ? 'manager'
           : 'employee',
+        organizationId: loginData.organizationId,
+        organizationName: loginData.organizationName,
       };
 
       setUser(loggedInUser);

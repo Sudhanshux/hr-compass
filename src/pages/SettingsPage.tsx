@@ -13,23 +13,14 @@ import { Loader2, Plus, Trash2, Shield, Users, KeyRound, UserPlus, Edit2 } from 
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 import { Navigate } from 'react-router-dom';
-import { employeeService } from '@/services/employee.service';
 import { departmentService } from '@/services/department.service';
 import { settingsService } from '@/services/settings.service';
-import { User } from '@/types/models';
 
 /* ── Types ────────────────────────────────────────────────────────── */
 interface RoleDef {
   id:          string;
   name:        string;
   permissions: string[];
-}
-
-interface UserRoleMapping {
-  userId:   string;
-  userName: string;
-  email:    string;
-  role:     string;
 }
 
 interface ManagedUser {
@@ -39,29 +30,19 @@ interface ManagedUser {
   email:      string;
   phone:      string;
   department: string;
-  active: boolean;
-  roleName:       string;
+  active:     boolean;
+  roleId:     string;
+  roleName:   string;
   status:     'active' | 'inactive';
 }
 
-/* ── Static config ────────────────────────────────────────────────── */
+// Permissions must match backend enum values (UPPERCASE)
 const allPermissions = [
-  'view_dashboard',   'manage_employees',  'manage_departments',
-  'manage_leave',     'approve_leave',     'view_payroll',
-  'manage_payroll',   'view_attendance',   'manage_attendance',
-  'manage_settings',  'view_performance',  'manage_onboarding',
-];
-
-const defaultRoles: RoleDef[] = [
-  { id: '1', name: 'admin',    permissions: [...allPermissions] },
-  { id: '2', name: 'manager',  permissions: ['view_dashboard', 'manage_employees', 'approve_leave', 'view_payroll', 'view_attendance', 'view_performance'] },
-  { id: '3', name: 'employee', permissions: ['view_dashboard', 'manage_leave', 'view_attendance', 'view_performance'] },
-];
-
-const defaultMappings: UserRoleMapping[] = [
-  { userId: '1', userName: 'Admin User',    email: 'admin@hrms.com',    role: 'admin'    },
-  { userId: '2', userName: 'Manager User',  email: 'manager@hrms.com',  role: 'manager'  },
-  { userId: '3', userName: 'Employee User', email: 'employee@hrms.com', role: 'employee' },
+  'VIEW_DASHBOARD',    'MANAGE_EMPLOYEES',   'MANAGE_DEPARTMENTS',
+  'MANAGE_LEAVE',      'APPROVE_LEAVE',       'VIEW_PAYROLL',
+  'MANAGE_PAYROLL',    'VIEW_ATTENDANCE',     'MANAGE_ATTENDANCE',
+  'MANAGE_SETTINGS',   'VIEW_PERFORMANCE',    'MANAGE_ONBOARDING',
+  'VIEW_ALL_PAYSLIPS', 'VIEW_OWN_PAYSLIP',
 ];
 
 const emptyUserForm = {
@@ -70,78 +51,73 @@ const emptyUserForm = {
   email:      '',
   phone:      '',
   department: '',
-  role:       'employee',
+  roleId:     '',
+  roleName:   '',
   status:     'active' as 'active' | 'inactive',
 };
 
+// Convert UPPER_SNAKE_CASE to Title Case for display
 const formatPerm = (p: string) =>
-  p.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+  p.toLowerCase().replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 
-/* ══════════════════════════════════════════════════════════════════
-   COMPONENT
-   ══════════════════════════════════════════════════════════════════ */
+/* ══════════════════════════════════════════════════════════════════ */
 const SettingsPage: React.FC = () => {
   const { user } = useAuth();
 
-  /* ── Role / mapping state ─────────────────────────────────────── */
-  const [roles, setRoles] = useState<RoleDef[]>([]);
-  const [mappings, setMappings] = useState<UserRoleMapping[]>([]);
-  const [roleDialog,  setRoleDialog]  = useState(false);
-  const [newRoleName, setNewRoleName] = useState('');
-  const [newRolePerms,setNewRolePerms]= useState<string[]>([]);
-  const [editingRole, setEditingRole] = useState<RoleDef | null>(null);
+  const [roles,        setRoles]        = useState<RoleDef[]>([]);
+  const [roleDialog,   setRoleDialog]   = useState(false);
+  const [newRoleName,  setNewRoleName]  = useState('');
+  const [newRolePerms, setNewRolePerms] = useState<string[]>([]);
+  const [editingRole,  setEditingRole]  = useState<RoleDef | null>(null);
+  const [editPerms,    setEditPerms]    = useState<string[]>([]);
+  const [savingPerms,  setSavingPerms]  = useState(false);
 
-  /* ── User management state ────────────────────────────────────── */
-  // FIX ②④: initialUsers removed — users seeded from API, not from undefined `Emp`
-  const [users,       setUsers]       = useState<ManagedUser[]>([]);
-  const [userDialog,  setUserDialog]  = useState(false);
-  const [editingUser, setEditingUser] = useState<ManagedUser | null>(null);
-  const [userForm,    setUserForm]    = useState(emptyUserForm);
+  const [users,        setUsers]        = useState<ManagedUser[]>([]);
+  const [userDialog,   setUserDialog]   = useState(false);
+  const [editingUser,  setEditingUser]  = useState<ManagedUser | null>(null);
+  const [userForm,     setUserForm]     = useState(emptyUserForm);
+  const [savingUser,   setSavingUser]   = useState(false);
 
-  /* ── API data state ───────────────────────────────────────────── */
-  const [departments, setDepartments] = useState<any[]>([]);
-  const [loading,     setLoading]     = useState(true);   // FIX ⑤: used in JSX below
+  const [departments,  setDepartments]  = useState<any[]>([]);
+  const [loading,      setLoading]      = useState(true);
 
-  /* ── FIX ①③: useEffect moved INSIDE the component ────────────── */
- useEffect(() => {
-  const load = async () => {
+  const mapUsers = (raw: any[]): ManagedUser[] =>
+    raw.map(u => ({
+      id:         u.id,
+      firstName:  u.firstName  || '',
+      lastName:   u.lastName   || '',
+      email:      u.email,
+      phone:      u.phone      || '',
+      department: u.departmentName || '',
+      active:     u.active,
+      roleId:     u.roleId     || '',
+      roleName:   u.roleName   || 'EMPLOYEE',
+      status:     u.active ? 'active' : 'inactive',
+    }));
+
+  const loadAll = async () => {
     try {
       setLoading(true);
-      const usersRes = await settingsService.getUsers();
-      const rolesRes = await settingsService.getRoles();
+      const [usersRes, rolesRes, deptRes] = await Promise.all([
+        settingsService.getUsers(),
+        settingsService.getRoles(),
+        departmentService.getAll(),
+      ]);
+      setUsers(mapUsers(usersRes));
+      setRoles(rolesRes);
+      setDepartments(deptRes);
+    } catch (err) {
+      console.error('Settings load failed:', err);
+      toast.error('Failed to load settings data');
+    } finally {
+      setLoading(false);
+    }
+  };
 
-      const deptRes = await departmentService.getAll();
-        const formattedUsers: ManagedUser[] = usersRes.map(u => ({
-          id: u.id,
-          firstName: u.firstName || '',
-          lastName: u.lastName || '',
-          email: u.email,
-          phone: u.phone || '',
-          department: u.departmentName || '',
-          active: u.active,
-          roleName: u.roleName || 'EMPLOYEE',    
-          status: u.active ? 'active' : 'inactive'
-          }));
+  useEffect(() => { loadAll(); }, []);
 
-        setUsers(formattedUsers);
-        setRoles(rolesRes);
-        setDepartments(deptRes);
-
-      } catch (err) {
-        console.error("API FAILED:", err);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-  load();
-}, []);
- // FIX ①: runs inside the component — valid hook call
-
-  /* ── Guard: only admins can access ───────────────────────────── */
   if (user?.role !== 'admin') return <Navigate to="/dashboard" replace />;
 
-  // FIX ⑤: show loader while API data is loading
   if (loading) {
     return (
       <div className="flex h-64 items-center justify-center">
@@ -150,119 +126,157 @@ const SettingsPage: React.FC = () => {
     );
   }
 
-  /* ── Role handlers ────────────────────────────────────────────── */
- const handleAddRole = async () => {
-  if (!newRoleName.trim()) {
-    toast.error('Role name required');
-    return;
-  }
+  /* ── Role handlers ──────────────────────────────────────────────── */
+  const handleAddRole = async () => {
+    if (!newRoleName.trim()) { toast.error('Role name required'); return; }
+    try {
+      const created = await settingsService.createRole({
+        name:        newRoleName.toUpperCase(),
+        description: '',
+        permissions: newRolePerms,
+      });
+      setRoles(prev => [...prev, created]);
+      toast.success('Role created');
+      setNewRoleName('');
+      setNewRolePerms([]);
+      setRoleDialog(false);
+    } catch {
+      toast.error('Failed to create role');
+    }
+  };
 
-  try {
-    const payload = {
-      name: newRoleName.toUpperCase(),
-      description: '',
-      notes:'',
-      permissions: newRolePerms
-    };
-
-    const created = await settingsService.createRole(payload);
-
-setRoles(prev => [...prev, created]);
-
-    toast.success('Role created');
-    setNewRoleName('');
-    setNewRolePerms([]);
-    setRoleDialog(false);
-
-  } catch (err) {
-    toast.error('Failed to create role');
-  }
-};
-
-  const handleDeleteRole = (id: string) => {
+  const handleDeleteRole = async (id: string) => {
     const role = roles.find(r => r.id === id);
-    if (role && ['admin', 'manager', 'employee'].includes(role.name)) {
+    if (role && ['ADMIN', 'MANAGER', 'EMPLOYEE'].includes(role.name.toUpperCase())) {
       toast.error('Cannot delete default roles'); return;
     }
-    setRoles(prev => prev.filter(r => r.id !== id));
-    toast.success('Role deleted');
+    try {
+      await settingsService.deleteRole(id);
+      setRoles(prev => prev.filter(r => r.id !== id));
+      toast.success('Role deleted');
+    } catch {
+      toast.error('Failed to delete role');
+    }
   };
 
-  const handlePermToggle = (roleId: string, perm: string) => {
-    setRoles(prev => prev.map(r => {
-      if (r.id !== roleId) return r;
-      const perms = r.permissions.includes(perm)
-        ? r.permissions.filter(p => p !== perm)
-        : [...r.permissions, perm];
-      return { ...r, permissions: perms };
-    }));
+  const openEditPermissions = (role: RoleDef) => {
+    setEditingRole(role);
+    setEditPerms([...role.permissions]);
   };
 
- 
+  const handlePermToggle = (perm: string) => {
+    setEditPerms(prev =>
+      prev.includes(perm) ? prev.filter(p => p !== perm) : [...prev, perm]
+    );
+  };
 
-  // User handlers
-  const openAddUser = () => {
-    setEditingUser(null);
-    setUserForm({ firstName: '', lastName: '', email: '', phone: '', department: '', role: 'employee', status: 'active' });
+  const handleSavePermissions = async () => {
+    if (!editingRole) return;
+    setSavingPerms(true);
+    try {
+      // Permissions sent as uppercase to match backend enum
+      await settingsService.updateRole(editingRole.id, { permissions: editPerms });
+      setRoles(prev => prev.map(r =>
+        r.id === editingRole.id ? { ...r, permissions: editPerms } : r
+      ));
+      setEditingRole(null);
+      toast.success('Permissions updated');
+    } catch {
+      toast.error('Failed to update permissions');
+    } finally {
+      setSavingPerms(false);
+    }
+  };
+
+  /* ── User handlers ──────────────────────────────────────────────── */
+  const openEditUser = (u: ManagedUser) => {
+    setEditingUser(u);
+    setUserForm({
+      firstName:  u.firstName,
+      lastName:   u.lastName,
+      email:      u.email,
+      phone:      u.phone,
+      department: u.department,
+      roleId:     u.roleId,
+      roleName:   u.roleName,
+      status:     u.status,
+    });
     setUserDialog(true);
   };
 
-
-
-  const openEditUser = (u: ManagedUser) => {
-  setEditingUser(u);
-  setUserForm({
-    firstName: u.firstName,
-    lastName: u.lastName,
-    email: u.email,
-    phone: u.phone,
-    department: u.department,
-    role: u.roleName,
-    status: u.status,
-  });
-  setUserDialog(true);
-};
-
-  const handleSaveUser = () => {
-    if (!userForm.firstName.trim() || !userForm.lastName.trim() || !userForm.email.trim()) {
-      toast.error('First name, last name, and email are required'); return;
-    }
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(userForm.email)) {
-      toast.error('Invalid email format'); return;
-    }
-    if (!userForm.department) { toast.error('Department is required'); return; }
-
+  const handleSaveUser = async () => {
     if (editingUser) {
-      setUsers(prev => prev.map(u => u.id === editingUser.id ? { ...u, ...userForm } : u));
-      toast.success('User updated successfully');
-    } else {
-      if (users.find(u => u.email.toLowerCase() === userForm.email.toLowerCase())) {
-        toast.error('Email already exists'); return;
+      // Only status and role can be changed (no general profile-update endpoint)
+      setSavingUser(true);
+      try {
+        const tasks: Promise<void>[] = [];
+
+        if (userForm.status !== editingUser.status) {
+          tasks.push(
+            userForm.status === 'active'
+              ? settingsService.activateUser(editingUser.id)
+              : settingsService.deactivateUser(editingUser.id)
+          );
+        }
+
+        if (userForm.roleId && userForm.roleId !== editingUser.roleId) {
+          tasks.push(settingsService.assignRole(editingUser.id, userForm.roleId));
+        }
+
+        if (tasks.length === 0) {
+          toast.info('No changes to save');
+          setUserDialog(false);
+          return;
+        }
+
+        await Promise.all(tasks);
+        setUsers(prev => prev.map(u =>
+          u.id === editingUser.id
+            ? {
+                ...u,
+                status:   userForm.status,
+                active:   userForm.status === 'active',
+                roleId:   userForm.roleId   || u.roleId,
+                roleName: userForm.roleName || u.roleName,
+              }
+            : u
+        ));
+        toast.success('User updated');
+        setUserDialog(false);
+      } catch (err: any) {
+        toast.error(err?.message ?? 'Failed to update user');
+      } finally {
+        setSavingUser(false);
       }
-            const newUser: ManagedUser = {
-        id: Date.now().toString(),
-        firstName: userForm.firstName,
-        lastName:  userForm.lastName,
-        email:     userForm.email,
-        phone:     userForm.phone,
-        department:userForm.department,
-        roleName:  userForm.role,               // map role -> roleName
-        active:    userForm.status === 'active',// map status -> active boolean
-        status:    userForm.status
-      };
-
-      setUsers(prev => [...prev, newUser]);
-      toast.success('User created successfully');
     }
-    setUserDialog(false);
   };
 
-  const handleDeleteUser = (id: string) => {
-    setUsers(prev => prev.filter(u => u.id !== id));
-    toast.success('User removed');
+  const handleDeleteUser = async (id: string) => {
+    try {
+      await settingsService.deleteUser(id);
+      setUsers(prev => prev.filter(u => u.id !== id));
+      toast.success('User removed');
+    } catch {
+      toast.error('Failed to delete user');
+    }
   };
 
-  /* ── Render ───────────────────────────────────────────────────── */
+  // Assign role by role ID (not name) — backend requires roleId field
+  const handleAssignRole = async (userId: string, roleName: string) => {
+    const role = roles.find(r => r.name === roleName);
+    if (!role) { toast.error('Role not found'); return; }
+    try {
+      await settingsService.assignRole(userId, role.id);
+      setUsers(prev => prev.map(u =>
+        u.id === userId ? { ...u, roleId: role.id, roleName: role.name } : u
+      ));
+      toast.success('Role updated');
+    } catch {
+      toast.error('Failed to update role');
+    }
+  };
+
+  /* ── Render ─────────────────────────────────────────────────────── */
   return (
     <div className="space-y-6">
       <div>
@@ -277,11 +291,8 @@ setRoles(prev => [...prev, created]);
           <TabsTrigger value="mapping" className="gap-2"><Users    size={16} /> User-Role Mapping</TabsTrigger>
         </TabsList>
 
-        {/* ── Users Tab ──────────────────────────────────────────── */}
+        {/* ── Users Tab ─────────────────────────────────────────────── */}
         <TabsContent value="users" className="space-y-4">
-          <div className="flex justify-end">
-            <Button onClick={openAddUser}><Plus size={16} className="mr-2" /> Add User</Button>
-          </div>
           <Card className="shadow-sm">
             <CardContent className="p-0">
               <Table>
@@ -297,12 +308,18 @@ setRoles(prev => [...prev, created]);
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {users.map(u => (
+                  {users.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={7} className="text-center py-8 text-muted-foreground text-sm">
+                        No users found.
+                      </TableCell>
+                    </TableRow>
+                  ) : users.map(u => (
                     <TableRow key={u.id}>
                       <TableCell className="font-medium">{u.firstName} {u.lastName}</TableCell>
                       <TableCell>{u.email}</TableCell>
-                      <TableCell>{u.phone}</TableCell>
-                      <TableCell>{u.department}</TableCell>
+                      <TableCell>{u.phone || '—'}</TableCell>
+                      <TableCell>{u.department || '—'}</TableCell>
                       <TableCell><Badge variant="outline" className="capitalize">{u.roleName}</Badge></TableCell>
                       <TableCell>
                         <Badge className={`border-0 text-xs ${u.status === 'active' ? 'bg-success/10 text-success' : 'bg-muted text-muted-foreground'}`}>
@@ -321,7 +338,7 @@ setRoles(prev => [...prev, created]);
           </Card>
         </TabsContent>
 
-        {/* ── Roles & Permissions Tab ─────────────────────────────── */}
+        {/* ── Roles & Permissions Tab ────────────────────────────────── */}
         <TabsContent value="roles" className="space-y-4">
           <div className="flex justify-end">
             <Button onClick={() => setRoleDialog(true)}><Plus size={16} className="mr-2" /> Add Role</Button>
@@ -334,13 +351,13 @@ setRoles(prev => [...prev, created]);
                     <div className="flex items-center gap-3">
                       <KeyRound size={18} className="text-primary" />
                       <div>
-                        <CardTitle className="text-base capitalize">{role.name}</CardTitle>
+                        <CardTitle className="text-base capitalize">{role.name.toLowerCase()}</CardTitle>
                         <CardDescription>{role.permissions.length} permissions assigned</CardDescription>
                       </div>
                     </div>
                     <div className="flex gap-2">
-                      <Button variant="outline" size="sm" onClick={() => setEditingRole(role)}>Edit Permissions</Button>
-                      {!['admin', 'manager', 'employee'].includes(role.name) && (
+                      <Button variant="outline" size="sm" onClick={() => openEditPermissions(role)}>Edit Permissions</Button>
+                      {!['ADMIN', 'MANAGER', 'EMPLOYEE'].includes(role.name.toUpperCase()) && (
                         <Button variant="ghost" size="icon" onClick={() => handleDeleteRole(role.id)}>
                           <Trash2 size={16} className="text-destructive" />
                         </Button>
@@ -363,8 +380,7 @@ setRoles(prev => [...prev, created]);
           </div>
         </TabsContent>
 
-        {/* ── User-Role Mapping Tab ───────────────────────────────── */}
-        {/* ── User-Role Mapping Tab ───────────────────────────────── */}
+        {/* ── User-Role Mapping Tab ──────────────────────────────────── */}
         <TabsContent value="mapping">
           <Card className="shadow-sm">
             <CardContent className="p-0">
@@ -383,23 +399,18 @@ setRoles(prev => [...prev, created]);
                       <TableCell className="font-medium">{u.firstName} {u.lastName}</TableCell>
                       <TableCell>{u.email}</TableCell>
                       <TableCell>
-                        <Badge variant="outline" className="capitalize">{u.roleName}</Badge>
+                        <Badge variant="outline" className="capitalize">{u.roleName.toLowerCase()}</Badge>
                       </TableCell>
                       <TableCell className="text-right">
                         <Select
                           value={u.roleName}
-                          onValueChange={v => {
-                            setUsers(prev => prev.map(x =>
-                              x.id === u.id ? { ...x, roleName: v } : x
-                            ));
-                            toast.success('Role updated');
-                          }}
+                          onValueChange={v => handleAssignRole(u.id, v)}
                         >
                           <SelectTrigger className="w-40 ml-auto"><SelectValue /></SelectTrigger>
                           <SelectContent>
                             {roles.map(r => (
                               <SelectItem key={r.id} value={r.name} className="capitalize">
-                                {r.name}
+                                {r.name.toLowerCase()}
                               </SelectItem>
                             ))}
                           </SelectContent>
@@ -414,82 +425,91 @@ setRoles(prev => [...prev, created]);
         </TabsContent>
       </Tabs>
 
-      {/* Add/Edit User Dialog */}
+      {/* ── Edit User Dialog ──────────────────────────────────────────── */}
       <Dialog open={userDialog} onOpenChange={setUserDialog}>
         <DialogContent className="max-w-lg">
-          <DialogHeader><DialogTitle>{editingUser ? 'Edit User' : 'Create New User'}</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>Edit User</DialogTitle>
+            <p className="text-xs text-muted-foreground mt-1">
+              Profile fields are read-only. You can update status and role.
+            </p>
+          </DialogHeader>
           <div className="space-y-4 py-2">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1">
-                <Label>First Name *</Label>
-                <Input value={userForm.firstName} onChange={e => setUserForm(f => ({ ...f, firstName: e.target.value }))} placeholder="John" />
+
+            {editingUser && (
+              <div className="space-y-3 rounded-md border p-3 bg-muted/30">
+                <div className="grid grid-cols-2 gap-2 text-sm">
+                  <span className="text-muted-foreground">Name</span>
+                  <span className="font-medium">{editingUser.firstName} {editingUser.lastName}</span>
+                  <span className="text-muted-foreground">Email</span>
+                  <span className="font-medium">{editingUser.email}</span>
+                  {editingUser.phone && (
+                    <>
+                      <span className="text-muted-foreground">Phone</span>
+                      <span className="font-medium">{editingUser.phone}</span>
+                    </>
+                  )}
+                  {editingUser.department && (
+                    <>
+                      <span className="text-muted-foreground">Department</span>
+                      <span className="font-medium">{editingUser.department}</span>
+                    </>
+                  )}
+                </div>
               </div>
-              <div className="space-y-1">
-                <Label>Last Name *</Label>
-                <Input value={userForm.lastName} onChange={e => setUserForm(f => ({ ...f, lastName: e.target.value }))} placeholder="Doe" />
+            )}
+
+            {editingUser && (
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <Label>Role</Label>
+                  <Select
+                    value={userForm.roleName}
+                    onValueChange={v => {
+                      const role = roles.find(r => r.name === v);
+                      setUserForm(f => ({ ...f, roleName: v, roleId: role?.id || '' }));
+                    }}
+                  >
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {roles.map(r => (
+                        <SelectItem key={r.id} value={r.name} className="capitalize">{r.name.toLowerCase()}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <Label>Status</Label>
+                  <Select value={userForm.status} onValueChange={v => setUserForm(f => ({ ...f, status: v as 'active' | 'inactive' }))}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="active">Active</SelectItem>
+                      <SelectItem value="inactive">Inactive</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
-            </div>
-            <div className="space-y-1">
-              <Label>Email *</Label>
-              <Input type="email" value={userForm.email} onChange={e => setUserForm(f => ({ ...f, email: e.target.value }))} placeholder="john.doe@hrms.com" />
-            </div>
-            <div className="space-y-1">
-              <Label>Phone</Label>
-              <Input value={userForm.phone} onChange={e => setUserForm(f => ({ ...f, phone: e.target.value }))} placeholder="+1 555-0100" />
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1">
-                <Label>Department *</Label>
-                {/* FIX ⑥: departments now populated from API so dropdown has options */}
-                <Select value={userForm.department} onValueChange={v => setUserForm(f => ({ ...f, department: v }))}>
-                  <SelectTrigger><SelectValue placeholder="Select department" /></SelectTrigger>
-                  <SelectContent>
-                    {departments.map(d => (
-                      <SelectItem key={d.id ?? d.name} value={d.name}>{d.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1">
-                <Label>Role</Label>
-                <Select value={userForm.role} onValueChange={v => setUserForm(f => ({ ...f, role: v }))}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {roles.map(r => <SelectItem key={r.id} value={r.name} className="capitalize">{r.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <div className="space-y-1">
-              <Label>Status</Label>
-              <Select value={userForm.status} onValueChange={v => setUserForm(f => ({ ...f, status: v as 'active' | 'inactive' }))}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="active">Active</SelectItem>
-                  <SelectItem value="inactive">Inactive</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+            )}
+
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setUserDialog(false)}>Cancel</Button>
-            <Button onClick={handleSaveUser}>{editingUser ? 'Update' : 'Create'} User</Button>
+            <Button variant="outline" onClick={() => setUserDialog(false)} disabled={savingUser}>Cancel</Button>
+            <Button onClick={handleSaveUser} disabled={savingUser}>
+              {savingUser && <Loader2 size={14} className="mr-2 animate-spin" />}
+              Update User
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Add Role Dialog */}
+      {/* ── Add Role Dialog ──────────────────────────────────────────── */}
       <Dialog open={roleDialog} onOpenChange={setRoleDialog}>
         <DialogContent>
           <DialogHeader><DialogTitle>Create New Role</DialogTitle></DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-1">
               <Label>Role Name *</Label>
-              <Input
-                value={newRoleName}
-                onChange={e => setNewRoleName(e.target.value)}
-                placeholder="e.g. supervisor"
-              />
+              <Input value={newRoleName} onChange={e => setNewRoleName(e.target.value)} placeholder="e.g. supervisor" />
             </div>
             <div className="space-y-2">
               <Label>Permissions</Label>
@@ -515,21 +535,19 @@ setRoles(prev => [...prev, created]);
         </DialogContent>
       </Dialog>
 
-      {/* ── Edit Permissions Dialog ─────────────────────────────────── */}
+      {/* ── Edit Permissions Dialog ──────────────────────────────────── */}
       <Dialog open={!!editingRole} onOpenChange={() => setEditingRole(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>
-              Edit Permissions — <span className="capitalize">{editingRole?.name}</span>
-            </DialogTitle>
+            <DialogTitle>Edit Permissions — <span className="capitalize">{editingRole?.name.toLowerCase()}</span></DialogTitle>
           </DialogHeader>
           <div className="space-y-2 py-2">
             <div className="grid grid-cols-2 gap-2">
               {allPermissions.map(p => (
                 <label key={p} className="flex items-center gap-2 text-sm cursor-pointer">
                   <Checkbox
-                    checked={editingRole?.permissions.includes(p) ?? false}
-                    onCheckedChange={() => editingRole && handlePermToggle(editingRole.id, p)}
+                    checked={editPerms.includes(p)}
+                    onCheckedChange={() => handlePermToggle(p)}
                   />
                   {formatPerm(p)}
                 </label>
@@ -537,13 +555,14 @@ setRoles(prev => [...prev, created]);
             </div>
           </div>
           <DialogFooter>
-            <Button onClick={() => { setEditingRole(null); toast.success('Permissions updated'); }}>
-              Done
+            <Button variant="outline" onClick={() => setEditingRole(null)} disabled={savingPerms}>Cancel</Button>
+            <Button onClick={handleSavePermissions} disabled={savingPerms}>
+              {savingPerms && <Loader2 size={14} className="mr-2 animate-spin" />}
+              Save Permissions
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
     </div>
   );
 };
